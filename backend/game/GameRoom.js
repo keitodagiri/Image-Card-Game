@@ -7,6 +7,7 @@ const {
   POISON_HIT_RATE,
   PARALYSIS_HIT_RATE,
   randomHeal,
+  randomPoisonDot,
   hitRoll,
 } = require('./GameLogic');
 
@@ -157,11 +158,18 @@ class GameRoom {
     // 使った枚数(1)+1 = 2枚ドロー
     this._drawCard(currentId);
     const drawn = this._drawCard(currentId);
+
+    // 使用可能なカードがなければ追加で1枚ドロー
+    const hasPlayable = p.hand.some(c => ACTIVE_EFFECTS.has(c.effect));
+    if (!hasPlayable) this._drawCard(currentId);
+
     this._emitTo(currentId, 'hand_update', { hand: p.hand });
+    const noPlayable = !p.hand.some(c => ACTIVE_EFFECTS.has(c.effect));
     this._emitAll('turn_start', {
       state: this.getPublicState(),
       currentPlayerId: currentId,
-      log: `${p.nickname} のターン`,
+      log: `${p.nickname} のターン${noPlayable ? '（使用可能なカードなし）' : ''}`,
+      canPass: noPlayable && !p.isParalyzed,
     });
 
     // 毒状態かつ毒無効をドローした場合
@@ -212,7 +220,7 @@ class GameRoom {
     const p = this.players.get(playerId);
 
     if (p.isPoisoned && !poisonCured) {
-      const dmg = BASE_DAMAGE.poison_dot;
+      const dmg = randomPoisonDot();
       p.hp -= dmg;
       this._emitAll('game_update', {
         state: this.getPublicState(),
@@ -279,6 +287,14 @@ class GameRoom {
       log: `${player.nickname} が「${this._cardLabel(card)}」を使用 → ${target.nickname}`,
     });
 
+    // カード使用時に即エフェクト表示（反射待ちの場合も含む）
+    this._emitAll('battle_effect', {
+      type: card.effect,
+      attribute: card.attribute || null,
+      targetId,
+      card: { imageUrl: card.imageUrl, name: card.name || null },
+    });
+
     // 反射チェック（爆発・毒・麻痺のみ）
     const reflectMap = { explosion: 'explosion_reflect', poison: 'poison_reflect', paralysis: 'paralysis_reflect' };
     const reflectEffect = reflectMap[card.effect];
@@ -312,6 +328,20 @@ class GameRoom {
     }
   }
 
+  handlePassTurn(socketId) {
+    if (this.phase !== 'action') return;
+    if (this._getCurrentPlayerId() !== socketId) return;
+    const p = this.players.get(socketId);
+    if (!p) return;
+    // 使用可能なカードがある場合はパス不可
+    if (p.hand.some(c => ACTIVE_EFFECTS.has(c.effect))) return;
+    this._emitAll('game_update', {
+      state: this.getPublicState(),
+      log: `${p.nickname} はパスした`,
+    });
+    this._advanceTurn();
+  }
+
   handleReflectResponse(socketId, doReflect) {
     if (this.pendingAction?.type !== 'reflect_choice') return;
     if (this.pendingAction.targetId !== socketId) return;
@@ -330,11 +360,14 @@ class GameRoom {
       const idx = target.hand.findIndex(c => c.effect === reflectMap[card.effect]);
       if (idx !== -1) target.hand.splice(idx, 1);
       this._emitTo(targetId, 'hand_update', { hand: target.hand });
-      this._emitAll('game_update', {
-        state: this.getPublicState(),
-        log: `${target.nickname} が反射！効果が ${attacker.nickname} に返った！`,
-      });
-      this._applyEffect(card, targetId, attackerId);
+      // 攻撃エフェクト表示（2800ms）の後に反射エフェクトを出す
+      setTimeout(() => {
+        this._emitAll('game_update', {
+          state: this.getPublicState(),
+          log: `${target.nickname} が反射！効果が ${attacker.nickname} に返った！`,
+        });
+        this._applyEffect(card, targetId, attackerId);
+      }, 2800);
     } else {
       this._applyEffect(card, attackerId, targetId);
     }
@@ -473,12 +506,16 @@ class GameRoom {
     const target = this.players.get(targetId);
     const idx = target.hand.findIndex(c => c.effect === 'absolute_defense');
     if (idx === -1) return false;
+    const defCard = target.hand[idx];
     target.hand.splice(idx, 1);
     this._emitTo(targetId, 'hand_update', { hand: target.hand });
     this._emitAll('game_update', {
       state: this.getPublicState(),
       log: `${target.nickname} の絶対防御が発動！攻撃を完全に防いだ！`,
     });
+    setTimeout(() => {
+      this._emitAll('battle_effect', { type: 'absolute_defense', targetId, card: { imageUrl: defCard.imageUrl, name: defCard.name || null } });
+    }, 2800);
     return true;
   }
 
@@ -486,12 +523,16 @@ class GameRoom {
     const target = this.players.get(targetId);
     const idx = target.hand.findIndex(c => c.effect === 'explosion_null');
     if (idx === -1) return false;
+    const defCard = target.hand[idx];
     target.hand.splice(idx, 1);
     this._emitTo(targetId, 'hand_update', { hand: target.hand });
     this._emitAll('game_update', {
       state: this.getPublicState(),
       log: `${target.nickname} の攻撃無効が発動！攻撃を防いだ！`,
     });
+    setTimeout(() => {
+      this._emitAll('battle_effect', { type: 'explosion_null', targetId, card: { imageUrl: defCard.imageUrl, name: defCard.name || null } });
+    }, 2800);
     return true;
   }
 
@@ -499,12 +540,16 @@ class GameRoom {
     const target = this.players.get(targetId);
     const idx = target.hand.findIndex(c => c.effect === 'paralysis_null');
     if (idx === -1) return false;
+    const defCard = target.hand[idx];
     target.hand.splice(idx, 1);
     this._emitTo(targetId, 'hand_update', { hand: target.hand });
     this._emitAll('game_update', {
       state: this.getPublicState(),
       log: `${target.nickname} の麻痺無効が発動！麻痺を防いだ！`,
     });
+    setTimeout(() => {
+      this._emitAll('battle_effect', { type: 'paralysis_null', targetId, card: { imageUrl: defCard.imageUrl, name: defCard.name || null } });
+    }, 2800);
     return true;
   }
 

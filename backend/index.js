@@ -80,6 +80,11 @@ io.on('connection', (socket) => {
     if (room) room.handlePlayCard(socket.id, cardInstanceId, targetId);
   });
 
+  socket.on('pass_turn', () => {
+    const room = roomManager.getRoomBySocketId(socket.id);
+    if (room) room.handlePassTurn(socket.id);
+  });
+
   socket.on('reflect_response', ({ doReflect }) => {
     const room = roomManager.getRoomBySocketId(socket.id);
     if (room) room.handleReflectResponse(socket.id, doReflect);

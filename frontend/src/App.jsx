@@ -18,7 +18,7 @@ export default function App() {
 
   return (
     <div className="home">
-      <h1 className="home-title">⚔️ カードバトル</h1>
+      <h1 className="home-title">⚔️ イメージカードバトル</h1>
       <p className="home-subtitle">好きな画像でカードを作り、友人とリアルタイム対戦！</p>
       <div className="home-buttons">
         <button className="btn btn-primary btn-large" onClick={() => setPage('deck')}>

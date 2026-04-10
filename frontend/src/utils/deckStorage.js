@@ -1,3 +1,5 @@
+import { EFFECT_MAP } from './gameConstants';
+
 const KEY = 'card_battle_deck';
 
 export function loadDeck() {
@@ -27,9 +29,8 @@ export function removeCard(deck, cardId) {
 
 /** デッキに追加できるか検証 */
 export function canAddCard(deck, effect) {
-  const LIMITED = ['invincible', 'absolute_defense'];
-  if (LIMITED.includes(effect)) {
-    return !deck.some(c => c.effect === effect);
-  }
-  return true;
+  const limit = EFFECT_MAP[effect]?.deckLimit;
+  if (limit == null) return true;
+  const count = deck.filter(c => c.effect === effect).length;
+  return count < limit;
 }

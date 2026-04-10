@@ -19,8 +19,11 @@ const EFFECT_CONFIG = {
   poison:     { emoji: '☠️', label: '毒！', bg: 'linear-gradient(135deg,#9c27b0,#6a1b9a)', color: '#fff', glow: '#9c27b0' },
   poison_dot: { emoji: '☠️', label: '毒ダメージ', bg: 'linear-gradient(135deg,#7b1fa2,#4a148c)', color: '#fff', glow: '#7b1fa2' },
   paralysis:  { emoji: '⚡', label: '麻痺！', bg: 'linear-gradient(135deg,#ffd600,#ff9800)', color: '#000', glow: '#ffd600' },
-  heal:       { emoji: '💚', label: '回復！', bg: 'linear-gradient(135deg,#00e676,#1b5e20)', color: '#fff', glow: '#00e676' },
-  miss:       { emoji: '💨', label: 'ミス！', bg: 'linear-gradient(135deg,#455a64,#263238)', color: '#fff', glow: '#607d8b' },
+  heal:             { emoji: '💚', label: '回復！',    bg: 'linear-gradient(135deg,#00e676,#1b5e20)', color: '#fff', glow: '#00e676' },
+  absolute_defense: { emoji: '🛡️', label: '絶対防御！', bg: 'linear-gradient(135deg,#1565c0,#0d47a1)', color: '#fff', glow: '#1e88e5' },
+  explosion_null:   { emoji: '🛡️', label: '攻撃無効！', bg: 'linear-gradient(135deg,#37474f,#263238)', color: '#fff', glow: '#546e7a' },
+  paralysis_null:   { emoji: '🛡️', label: '麻痺無効！', bg: 'linear-gradient(135deg,#f57f17,#e65100)', color: '#fff', glow: '#ffa000' },
+  miss:             { emoji: '💨', label: 'ミス！',     bg: 'linear-gradient(135deg,#455a64,#263238)', color: '#fff', glow: '#607d8b' },
 };
 
 function getEffectConfig(type, attribute) {
@@ -32,7 +35,7 @@ let effectCounter = 0;
 
 function BattleEffectLayer({ effects }) {
   return (
-    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 50 }}>
+    <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 200 }}>
       {effects.map(ef => {
         const cfg = getEffectConfig(ef.type, ef.attribute);
         return (
@@ -139,6 +142,7 @@ export default function BattlePage({ initData, onExit }) {
   const [timer, setTimer]               = useState(100);
   const [rematchVotes, setRematchVotes] = useState({ votes: 0, total: 0 });
   const [myRematchVoted, setMyRematchVoted] = useState(false);
+  const [canPass, setCanPass] = useState(false);
   const logRef  = useRef();
   const timerRef = useRef();
 
@@ -147,12 +151,13 @@ export default function BattlePage({ initData, onExit }) {
   useEffect(() => {
     socket.on('hand_update', ({ hand }) => setMyHand(hand));
 
-    socket.on('turn_start', ({ state, log }) => {
+    socket.on('turn_start', ({ state, log, canPass: cp }) => {
       setGameState(state);
       if (log) addLog(log);
       setSelectedCard(null);
       setSelectedTarget(null);
       setIsMyTurn(false);
+      setCanPass(cp || false);
       // タイムアウト等でサーバーが自動処理した場合、残っているプロンプトを閉じる
       setPrompt(prev =>
         prev && ['reflect', 'poison_null', 'heal_target'].includes(prev.type) ? null : prev
@@ -165,7 +170,9 @@ export default function BattlePage({ initData, onExit }) {
       if (log) addLog(log);
     });
 
-    socket.on('your_turn', () => setIsMyTurn(true));
+    socket.on('your_turn', () => {
+      setIsMyTurn(true);
+    });
 
     socket.on('reflect_prompt', ({ effectType, attribute, attackerId, attackerNickname }) => {
       setPrompt({ type: 'reflect', effectType, attribute, attackerId, attackerNickname });
@@ -463,6 +470,11 @@ export default function BattlePage({ initData, onExit }) {
               <button className="btn btn-primary" disabled={!selectedCard || !selectedTarget} onClick={handleConfirm}>
                 使用
               </button>
+              {canPass && (
+                <button className="btn btn-ghost" onClick={() => socket.emit('pass_turn')} style={{ marginLeft: 4 }}>
+                  パス
+                </button>
+              )}
             </>
           ) : (
             <div className="info" style={{ textAlign: 'center', width: '100%' }}>
