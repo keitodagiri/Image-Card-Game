@@ -362,6 +362,13 @@ class GameRoom {
       this._emitTo(targetId, 'hand_update', { hand: target.hand });
       // 攻撃エフェクト表示（2800ms）の後に反射エフェクトを出す
       setTimeout(() => {
+        // 反射した攻撃のエフェクト（攻撃者に向けて）
+        this._emitAll('battle_effect', {
+          type: card.effect,
+          attribute: card.attribute || null,
+          targetId: attackerId,
+          card: { imageUrl: card.imageUrl, name: card.name || null },
+        });
         this._emitAll('game_update', {
           state: this.getPublicState(),
           log: `${target.nickname} が反射！効果が ${attacker.nickname} に返った！`,
@@ -435,7 +442,7 @@ class GameRoom {
         if (mult === 0.5) msg += ' (属性不利 ×0.5)';
         msg += ` (HP: ${Math.max(0, target.hp)})`;
         this._emitAll('game_update', { state: this.getPublicState(), log: msg });
-        this._emitAll('battle_effect', { type: 'explosion', attribute: card.attribute, targetId, damage: dmg, multiplier: mult, card: { imageUrl: card.imageUrl, name: card.name || null } });
+        // battle_effect は handlePlayCard / _resolveReflect で emit 済み
         break;
       }
 
@@ -446,7 +453,7 @@ class GameRoom {
           state: this.getPublicState(),
           log: `無敵技！${target.nickname} に ${BASE_DAMAGE.invincible} の固定ダメージ！ (HP: ${Math.max(0, target.hp)})`,
         });
-        this._emitAll('battle_effect', { type: 'invincible', targetId, damage: BASE_DAMAGE.invincible, card: { imageUrl: card.imageUrl, name: card.name || null } });
+        // battle_effect は handlePlayCard / _resolveReflect で emit 済み
         break;
       }
 
@@ -458,11 +465,10 @@ class GameRoom {
             state: this.getPublicState(),
             log: `${target.nickname} が毒状態に！毎ターン ${BASE_DAMAGE.poison_dot} ダメージ`,
           });
-          this._emitAll('battle_effect', { type: 'poison', targetId, hit: true, card: { imageUrl: card.imageUrl, name: card.name || null } });
         } else {
           this._emitAll('game_update', { state: this.getPublicState(), log: '毒が外れた！(命中率65%)' });
-          this._emitAll('battle_effect', { type: 'poison', targetId, hit: false, card: { imageUrl: card.imageUrl, name: card.name || null } });
         }
+        // battle_effect は handlePlayCard / _resolveReflect で emit 済み
         break;
       }
 
@@ -475,11 +481,10 @@ class GameRoom {
             state: this.getPublicState(),
             log: `${target.nickname} が麻痺！次のターン行動不能`,
           });
-          this._emitAll('battle_effect', { type: 'paralysis', targetId, hit: true, card: { imageUrl: card.imageUrl, name: card.name || null } });
         } else {
           this._emitAll('game_update', { state: this.getPublicState(), log: '麻痺が外れた！(命中率70%)' });
-          this._emitAll('battle_effect', { type: 'paralysis', targetId, hit: false, card: { imageUrl: card.imageUrl, name: card.name || null } });
         }
+        // battle_effect は handlePlayCard / _resolveReflect で emit 済み
         break;
       }
 
@@ -490,7 +495,7 @@ class GameRoom {
           state: this.getPublicState(),
           log: `${target.nickname} が HP ${amount} 回復！ (HP: ${target.hp})`,
         });
-        this._emitAll('battle_effect', { type: 'heal', targetId, amount, card: { imageUrl: card.imageUrl, name: card.name || null } });
+        // battle_effect は handlePlayCard で emit 済み
         break;
       }
     }
