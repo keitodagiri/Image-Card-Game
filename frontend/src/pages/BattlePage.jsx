@@ -20,10 +20,13 @@ const EFFECT_CONFIG = {
   poison_dot: { emoji: '☠️', label: '毒ダメージ', bg: 'linear-gradient(135deg,#7b1fa2,#4a148c)', color: '#fff', glow: '#7b1fa2' },
   paralysis:  { emoji: '⚡', label: '麻痺！', bg: 'linear-gradient(135deg,#ffd600,#ff9800)', color: '#000', glow: '#ffd600' },
   heal:             { emoji: '💚', label: '回復！',    bg: 'linear-gradient(135deg,#00e676,#1b5e20)', color: '#fff', glow: '#00e676' },
-  absolute_defense: { emoji: '🛡️', label: '絶対防御！', bg: 'linear-gradient(135deg,#1565c0,#0d47a1)', color: '#fff', glow: '#1e88e5' },
-  explosion_null:   { emoji: '🛡️', label: '攻撃無効！', bg: 'linear-gradient(135deg,#37474f,#263238)', color: '#fff', glow: '#546e7a' },
-  paralysis_null:   { emoji: '🛡️', label: '麻痺無効！', bg: 'linear-gradient(135deg,#f57f17,#e65100)', color: '#fff', glow: '#ffa000' },
-  miss:             { emoji: '💨', label: 'ミス！',     bg: 'linear-gradient(135deg,#455a64,#263238)', color: '#fff', glow: '#607d8b' },
+  absolute_defense:  { emoji: '🛡️', label: '絶対防御！', bg: 'linear-gradient(135deg,#1565c0,#0d47a1)', color: '#fff', glow: '#1e88e5' },
+  explosion_null:    { emoji: '🛡️', label: '攻撃無効！', bg: 'linear-gradient(135deg,#37474f,#263238)', color: '#fff', glow: '#546e7a' },
+  paralysis_null:    { emoji: '🛡️', label: '麻痺無効！', bg: 'linear-gradient(135deg,#f57f17,#e65100)', color: '#fff', glow: '#ffa000' },
+  explosion_reflect: { emoji: '🔄', label: '攻撃反射！', bg: 'linear-gradient(135deg,#e94560,#9c27b0)', color: '#fff', glow: '#e94560' },
+  poison_reflect:    { emoji: '🔄', label: '毒反射！',   bg: 'linear-gradient(135deg,#9c27b0,#4a148c)', color: '#fff', glow: '#9c27b0' },
+  paralysis_reflect: { emoji: '🔄', label: '麻痺反射！', bg: 'linear-gradient(135deg,#ffd600,#ff6d00)', color: '#000', glow: '#ffd600' },
+  miss:              { emoji: '💨', label: 'ミス！',     bg: 'linear-gradient(135deg,#455a64,#263238)', color: '#fff', glow: '#607d8b' },
 };
 
 function getEffectConfig(type, attribute) {

@@ -356,24 +356,39 @@ class GameRoom {
     const attacker = this.players.get(attackerId);
 
     if (doReflect) {
-      const reflectMap = { explosion: 'explosion_reflect', poison: 'poison_reflect', paralysis: 'paralysis_reflect' };
-      const idx = target.hand.findIndex(c => c.effect === reflectMap[card.effect]);
-      if (idx !== -1) target.hand.splice(idx, 1);
+      const reflectEffectMap = { explosion: 'explosion_reflect', poison: 'poison_reflect', paralysis: 'paralysis_reflect' };
+      const reflectEffectName = reflectEffectMap[card.effect];
+      const idx = target.hand.findIndex(c => c.effect === reflectEffectName);
+      let defCard = null;
+      if (idx !== -1) {
+        defCard = target.hand[idx];
+        target.hand.splice(idx, 1);
+      }
       this._emitTo(targetId, 'hand_update', { hand: target.hand });
-      // 攻撃エフェクト表示（2800ms）の後に反射エフェクトを出す
+
+      // 攻撃エフェクト（2800ms）の後：反射カードを表示
       setTimeout(() => {
-        // 反射した攻撃のエフェクト（攻撃者に向けて）
-        this._emitAll('battle_effect', {
-          type: card.effect,
-          attribute: card.attribute || null,
-          targetId: attackerId,
-          card: { imageUrl: card.imageUrl, name: card.name || null },
-        });
         this._emitAll('game_update', {
           state: this.getPublicState(),
           log: `${target.nickname} が反射！効果が ${attacker.nickname} に返った！`,
         });
-        this._applyEffect(card, targetId, attackerId);
+        if (defCard) {
+          this._emitAll('battle_effect', {
+            type: reflectEffectName,
+            targetId,
+            card: { imageUrl: defCard.imageUrl, name: defCard.name || null },
+          });
+        }
+        // 反射カード表示（2800ms）の後：反射された攻撃を表示
+        setTimeout(() => {
+          this._emitAll('battle_effect', {
+            type: card.effect,
+            attribute: card.attribute || null,
+            targetId: attackerId,
+            card: { imageUrl: card.imageUrl, name: card.name || null },
+          });
+          this._applyEffect(card, targetId, attackerId);
+        }, 2800);
       }, 2800);
     } else {
       this._applyEffect(card, attackerId, targetId);
