@@ -319,7 +319,6 @@ class GameRoom {
       this.phase = 'reflect_choice';
       this._emitTo(effectiveTargetId, 'reflect_prompt', {
         effectType: card.effect,
-        attribute: card.attribute || null,
         attackerId: socketId,
         attackerNickname: player.nickname,
       });
@@ -661,7 +660,7 @@ class GameRoom {
     this.rematchVotes = new Set();
     this.status = 'playing';
     this.currentTurnIndex = 0;
-    this.phase = 'playing';
+    this.phase = 'idle';
     this.pendingAction = null;
 
     this.joinOrder.forEach((id, idx) => {

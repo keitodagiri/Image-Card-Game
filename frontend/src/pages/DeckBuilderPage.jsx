@@ -150,7 +150,7 @@ export default function DeckBuilderPage({ onBack }) {
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>選択中（もう一度タップで変更）</div>
                 <button
                   className="effect-btn selected"
-                  onClick={() => { setSelectedEffect(null); setSelectedAttr(null); }}
+                  onClick={() => setSelectedEffect(null)}
                   style={{ width: '100%' }}
                 >
                   <span style={{ color: CATEGORY_COLORS[EFFECT_MAP[selectedEffect]?.category], fontSize: 14 }}>
