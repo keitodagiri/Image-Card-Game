@@ -4,8 +4,8 @@ const BASE_DAMAGE = {
   poison_dot: 8, // 使用しない（randomPoisonDotで代替）
 };
 
-const POISON_DOT_MIN = 8;
-const POISON_DOT_MAX = 20;
+const POISON_DOT_MIN = 5;
+const POISON_DOT_MAX = 12;
 
 const HEAL_MIN = 10;
 const HEAL_MAX = 25;

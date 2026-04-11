@@ -1,6 +1,6 @@
 export const EFFECTS = [
   { id: 'explosion',         label: '攻撃',     category: 'attack',  deckLimit: null, description: '即時25ダメージ' },
-  { id: 'poison',            label: '毒',       category: 'attack',  deckLimit: null, description: '70%で命中。毎ターン8〜20のランダムダメージ（永続）' },
+  { id: 'poison',            label: '毒',       category: 'attack',  deckLimit: null, description: '70%で命中。毎ターン5〜12のランダムダメージ（永続）' },
   { id: 'paralysis',         label: '麻痺',     category: 'attack',  deckLimit: null, description: '60%で1ターン行動不能にする' },
   { id: 'heal',              label: '回復',     category: 'heal',    deckLimit: 3,    description: 'ランダム量でHP回復（上限100）。デッキに3枚まで' },
   { id: 'explosion_reflect', label: '攻撃反射', category: 'reflect', deckLimit: 1,    description: '攻撃を受けた時、反射するか選択できる。デッキに1枚まで' },
