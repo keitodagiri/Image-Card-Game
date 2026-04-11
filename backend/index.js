@@ -67,6 +67,16 @@ io.on('connection', (socket) => {
       socket.emit('room_error', { message: '2人以上必要です' });
       return;
     }
+    // 全プレイヤーのデッキ枚数チェック（最低5枚）
+    const MIN_DECK = 5;
+    for (const id of room.joinOrder) {
+      const ps = io.sockets.sockets.get(id);
+      if (!ps?.deck || ps.deck.length < MIN_DECK) {
+        const p = room.players.get(id);
+        socket.emit('room_error', { message: `${p?.nickname || 'プレイヤー'} のデッキが${MIN_DECK}枚未満です` });
+        return;
+      }
+    }
     const playerDecks = new Map();
     room.joinOrder.forEach(id => {
       const playerSocket = io.sockets.sockets.get(id);

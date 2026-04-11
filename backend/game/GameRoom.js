@@ -272,6 +272,21 @@ class GameRoom {
       log: `${player.nickname} が「${this._cardLabel(card)}」を使用 → ${target.nickname}`,
     });
 
+    // エフェクト表示用データを事前計算
+    const preCalc = {};
+    if (card.effect === 'explosion') {
+      preCalc.mult   = getAttributeMultiplier(card.attribute, target.currentAttribute);
+      preCalc.damage = Math.round(BASE_DAMAGE.explosion * preCalc.mult);
+    } else if (card.effect === 'invincible') {
+      preCalc.damage = BASE_DAMAGE.invincible;
+    } else if (card.effect === 'poison') {
+      preCalc.hit = hitRoll(POISON_HIT_RATE);
+    } else if (card.effect === 'paralysis') {
+      preCalc.hit = hitRoll(PARALYSIS_HIT_RATE);
+    } else if (card.effect === 'heal') {
+      preCalc.amount = randomHeal();
+    }
+
     // カード使用時に即エフェクト表示（反射待ちの場合も含む）
     const effectAnnouncements = {
       explosion:  `${player.nickname}が${target.nickname}を攻撃！`,
@@ -286,12 +301,20 @@ class GameRoom {
       targetId: effectiveTargetId,
       card: { imageUrl: card.imageUrl, name: card.name || null },
       announcement: effectAnnouncements[card.effect] || '',
+      damage:     preCalc.damage,
+      multiplier: preCalc.mult,
+      hit:        preCalc.hit,
+      amount:     preCalc.amount,
     });
 
     // 反射チェック（爆発・毒・麻痺のみ）
     const reflectMap = { explosion: 'explosion_reflect', poison: 'poison_reflect', paralysis: 'paralysis_reflect' };
     const reflectEffect = reflectMap[card.effect];
-    const canReflect = reflectEffect && !target.isEliminated && target.hand.some(c => c.effect === reflectEffect);
+    const hasReflectCard = target.hand.some(c => c.effect === reflectEffect);
+    const canReflect = !!reflectEffect && !target.isEliminated && hasReflectCard;
+    if (reflectEffect && !canReflect) {
+      console.log(`[handlePlayCard] canReflect=false: effect=${card.effect} reflectCard=${hasReflectCard} targetElim=${target.isEliminated}`);
+    }
 
     if (canReflect) {
       this.phase = 'reflect_choice';
@@ -306,18 +329,19 @@ class GameRoom {
         card,
         attackerId: socketId,
         targetId: effectiveTargetId,
+        preCalc,
         timeout: setTimeout(() => {
           if (this.pendingAction?.type === 'reflect_choice') {
             const pa = this.pendingAction;
             this.pendingAction = null;
-            this._resolveReflect(false, pa.card, pa.attackerId, pa.targetId);
+            this._resolveReflect(false, pa.card, pa.attackerId, pa.targetId, pa.preCalc);
           }
         }, REFLECT_TIMEOUT_MS),
       };
     } else if (card.effect === 'heal' && this.mode === 'team') {
-      this._promptHealTarget(socketId, card);
+      this._promptHealTarget(socketId, card, preCalc);
     } else {
-      this._applyEffect(card, socketId, effectiveTargetId);
+      this._applyEffect(card, socketId, effectiveTargetId, preCalc);
     }
   }
 
@@ -336,17 +360,19 @@ class GameRoom {
   }
 
   handleReflectResponse(socketId, doReflect) {
+    console.log(`[handleReflectResponse] socketId=${socketId} doReflect=${doReflect} pendingType=${this.pendingAction?.type} pendingTarget=${this.pendingAction?.targetId}`);
     if (this.pendingAction?.type !== 'reflect_choice') return;
     if (this.pendingAction.targetId !== socketId) return;
     clearTimeout(this.pendingAction.timeout);
-    const { card, attackerId, targetId } = this.pendingAction;
+    const { card, attackerId, targetId, preCalc } = this.pendingAction;
     this.pendingAction = null;
-    this._resolveReflect(doReflect, card, attackerId, targetId);
+    this._resolveReflect(doReflect, card, attackerId, targetId, preCalc);
   }
 
-  _resolveReflect(doReflect, card, attackerId, targetId) {
+  _resolveReflect(doReflect, card, attackerId, targetId, preCalc = {}) {
     const target = this.players.get(targetId);
     const attacker = this.players.get(attackerId);
+    console.log(`[_resolveReflect] doReflect=${doReflect} card=${card.effect} attacker=${attackerId} target=${targetId}`);
 
     if (doReflect) {
       const reflectEffectMap = { explosion: 'explosion_reflect', poison: 'poison_reflect', paralysis: 'paralysis_reflect' };
@@ -356,6 +382,8 @@ class GameRoom {
       if (idx !== -1) {
         defCard = target.hand[idx];
         target.hand.splice(idx, 1);
+      } else {
+        console.warn(`[_resolveReflect] reflect card not found in hand! effect=${reflectEffectName}`);
       }
       this._emitTo(targetId, 'hand_update', { hand: target.hand });
 
@@ -373,17 +401,17 @@ class GameRoom {
             announcement: `${target.nickname}が${attacker.nickname}の攻撃を反射！`,
           });
         }
-        // 反射カード表示（2800ms）の後：効果を適用
+        // 反射カード表示（2800ms）の後：効果を適用（攻撃者が対象になる）
         setTimeout(() => {
-          this._applyEffect(card, targetId, attackerId);
+          this._applyEffect(card, targetId, attackerId, preCalc);
         }, 2800);
       }, 2800);
     } else {
-      this._applyEffect(card, attackerId, targetId);
+      this._applyEffect(card, attackerId, targetId, preCalc);
     }
   }
 
-  _promptHealTarget(healerId, card) {
+  _promptHealTarget(healerId, card, preCalc = {}) {
     const healer = this.players.get(healerId);
     const teammates = this.joinOrder
       .filter(id => {
@@ -399,11 +427,12 @@ class GameRoom {
       type: 'heal_target_choice',
       healerId,
       card,
+      preCalc,
       timeout: setTimeout(() => {
         if (this.pendingAction?.type === 'heal_target_choice') {
           const pa = this.pendingAction;
           this.pendingAction = null;
-          this._applyEffect(pa.card, pa.healerId, pa.healerId);
+          this._applyEffect(pa.card, pa.healerId, pa.healerId, pa.preCalc);
         }
       }, HEAL_TARGET_TIMEOUT_MS),
     };
@@ -418,14 +447,14 @@ class GameRoom {
     if (!target || target.isEliminated) return;
     if (this.mode === 'team' && healer && target.team !== healer.team) return;
     clearTimeout(this.pendingAction.timeout);
-    const { card, healerId } = this.pendingAction;
+    const { card, healerId, preCalc } = this.pendingAction;
     this.pendingAction = null;
-    this._applyEffect(card, healerId, targetId);
+    this._applyEffect(card, healerId, targetId, preCalc);
   }
 
   // ─── 効果処理 ──────────────────────────────────────────────
 
-  _applyEffect(card, sourceId, targetId) {
+  _applyEffect(card, sourceId, targetId, preCalc = {}) {
     const target = this.players.get(targetId);
     const source = this.players.get(sourceId);
     if (!target || !source) {
@@ -438,74 +467,75 @@ class GameRoom {
       source.currentAttribute = card.attribute;
     }
 
+    let defenseTookOver = false;
+
     switch (card.effect) {
       case 'explosion': {
-        if (this._tryAbsoluteDefense(targetId)) break;
-        const mult = getAttributeMultiplier(card.attribute, target.currentAttribute);
-        const dmg = Math.round(BASE_DAMAGE.explosion * mult);
+        if (this._tryAbsoluteDefense(targetId)) { defenseTookOver = true; break; }
+        const mult = preCalc.mult ?? getAttributeMultiplier(card.attribute, target.currentAttribute);
+        const dmg  = preCalc.damage ?? Math.round(BASE_DAMAGE.explosion * mult);
         target.hp -= dmg;
         let msg = `${target.nickname} に攻撃 ${dmg} ダメージ！`;
-        if (mult === 2) msg += ' (属性有利 ×2)';
+        if (mult === 2)   msg += ' (属性有利 ×2)';
         if (mult === 0.5) msg += ' (属性不利 ×0.5)';
         msg += ` (HP: ${Math.max(0, target.hp)})`;
         this._emitAll('game_update', { state: this.getPublicState(), log: msg });
-        // battle_effect は handlePlayCard / _resolveReflect で emit 済み
         break;
       }
 
       case 'invincible': {
-        if (this._tryAbsoluteDefense(targetId)) break;
-        target.hp -= BASE_DAMAGE.invincible;
+        if (this._tryAbsoluteDefense(targetId)) { defenseTookOver = true; break; }
+        const dmg = preCalc.damage ?? BASE_DAMAGE.invincible;
+        target.hp -= dmg;
         this._emitAll('game_update', {
           state: this.getPublicState(),
-          log: `無敵技！${target.nickname} に ${BASE_DAMAGE.invincible} の固定ダメージ！ (HP: ${Math.max(0, target.hp)})`,
+          log: `無敵技！${target.nickname} に ${dmg} の固定ダメージ！ (HP: ${Math.max(0, target.hp)})`,
         });
-        // battle_effect は handlePlayCard / _resolveReflect で emit 済み
         break;
       }
 
       case 'poison': {
-        if (this._tryAbsoluteDefense(targetId)) break;
-        if (hitRoll(POISON_HIT_RATE)) {
+        if (this._tryAbsoluteDefense(targetId)) { defenseTookOver = true; break; }
+        const hit = preCalc.hit ?? hitRoll(POISON_HIT_RATE);
+        if (hit) {
           target.isPoisoned = true;
           this._emitAll('game_update', {
             state: this.getPublicState(),
             log: `${target.nickname} が毒状態に！毎ターン ${BASE_DAMAGE.poison_dot} ダメージ`,
           });
         } else {
-          this._emitAll('game_update', { state: this.getPublicState(), log: '毒が外れた！(命中率65%)' });
+          this._emitAll('game_update', { state: this.getPublicState(), log: '毒が外れた！(命中率70%)' });
         }
-        // battle_effect は handlePlayCard / _resolveReflect で emit 済み
         break;
       }
 
       case 'paralysis': {
-        if (this._tryAbsoluteDefense(targetId)) break;
-        if (hitRoll(PARALYSIS_HIT_RATE)) {
+        if (this._tryAbsoluteDefense(targetId)) { defenseTookOver = true; break; }
+        const hit = preCalc.hit ?? hitRoll(PARALYSIS_HIT_RATE);
+        if (hit) {
           target.isParalyzed = true;
           this._emitAll('game_update', {
             state: this.getPublicState(),
             log: `${target.nickname} が麻痺！次のターン行動不能`,
           });
         } else {
-          this._emitAll('game_update', { state: this.getPublicState(), log: '麻痺が外れた！(命中率70%)' });
+          this._emitAll('game_update', { state: this.getPublicState(), log: '麻痺が外れた！(命中率60%)' });
         }
-        // battle_effect は handlePlayCard / _resolveReflect で emit 済み
         break;
       }
 
       case 'heal': {
-        const amount = randomHeal();
-        target.hp += amount;
+        const amount = preCalc.amount ?? randomHeal();
+        target.hp = Math.min(INITIAL_HP, target.hp + amount);
         this._emitAll('game_update', {
           state: this.getPublicState(),
           log: `${target.nickname} が HP ${amount} 回復！ (HP: ${target.hp})`,
         });
-        // battle_effect は handlePlayCard で emit 済み
         break;
       }
     }
 
+    if (defenseTookOver) return; // _tryAbsoluteDefense がタイマーで _advanceTurn を呼ぶ
     this._checkEliminations();
     if (this._checkGameOver()) return;
     this._advanceTurn();
@@ -524,8 +554,18 @@ class GameRoom {
       state: this.getPublicState(),
       log: `${target.nickname} の絶対防御が発動！攻撃を完全に防いだ！`,
     });
+    // 攻撃エフェクト（2800ms）後に防御エフェクト表示、さらに2800ms後にターン進行
     setTimeout(() => {
-      this._emitAll('battle_effect', { type: 'absolute_defense', targetId, card: { imageUrl: defCard.imageUrl, name: defCard.name || null }, announcement: `${target.nickname}が絶対防御！` });
+      this._emitAll('battle_effect', {
+        type: 'absolute_defense',
+        targetId,
+        card: { imageUrl: defCard.imageUrl, name: defCard.name || null },
+        announcement: `${target.nickname}が絶対防御！`,
+      });
+      setTimeout(() => {
+        this._checkEliminations();
+        if (!this._checkGameOver()) this._advanceTurn();
+      }, 2800);
     }, 2800);
     return true;
   }
