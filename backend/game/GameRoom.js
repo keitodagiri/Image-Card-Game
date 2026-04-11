@@ -12,12 +12,10 @@ const {
 } = require('./GameLogic');
 
 const REFLECT_TIMEOUT_MS = 20000;
-const POISON_NULL_TIMEOUT_MS = 10000;
 const HEAL_TARGET_TIMEOUT_MS = 15000;
 
 const CARD_NAMES = {
   explosion: '攻撃', poison: '毒', paralysis: '麻痺', heal: '回復',
-  explosion_null: '攻撃無効', poison_null: '毒無効', paralysis_null: '麻痺無効',
   explosion_reflect: '攻撃反射', poison_reflect: '毒反射', paralysis_reflect: '麻痺反射',
   invincible: '無敵技', absolute_defense: '絶対防御',
 };
@@ -172,48 +170,7 @@ class GameRoom {
       canPass: noPlayable && !p.isParalyzed,
     });
 
-    // 毒状態かつ毒無効をドローした場合
-    if (drawn?.effect === 'poison_null' && p.isPoisoned) {
-      this.phase = 'poison_null_choice';
-      this._emitAll('game_update', {
-        state: this.getPublicState(),
-        log: `${p.nickname} が毒無効をドロー！使用するか選択中...`,
-      });
-      this._emitTo(currentId, 'poison_null_prompt', {});
-
-      this.pendingAction = {
-        type: 'poison_null_choice',
-        playerId: currentId,
-        timeout: setTimeout(() => {
-          if (this.pendingAction?.type === 'poison_null_choice') {
-            this.pendingAction = null;
-            this._processPoisonAndParalysis(currentId, false);
-          }
-        }, POISON_NULL_TIMEOUT_MS),
-      };
-    } else {
-      this._processPoisonAndParalysis(currentId, false);
-    }
-  }
-
-  handlePoisonNullResponse(socketId, use) {
-    if (this.pendingAction?.type !== 'poison_null_choice') return;
-    if (this.pendingAction.playerId !== socketId) return;
-    clearTimeout(this.pendingAction.timeout);
-    this.pendingAction = null;
-
-    const p = this.players.get(socketId);
-    if (use) {
-      const idx = p.hand.findIndex(c => c.effect === 'poison_null');
-      if (idx !== -1) p.hand.splice(idx, 1);
-      p.isPoisoned = false;
-      this._emitTo(socketId, 'hand_update', { hand: p.hand });
-      this._emitAll('game_update', {
-        state: this.getPublicState(),
-        log: `${p.nickname} が毒無効を使用 → 毒が治癒された！`,
-      });
-    }
-    this._processPoisonAndParalysis(socketId, use);
+    this._processPoisonAndParalysis(currentId, false);
   }
 
   _processPoisonAndParalysis(playerId, poisonCured) {
@@ -448,7 +405,6 @@ class GameRoom {
     switch (card.effect) {
       case 'explosion': {
         if (this._tryAbsoluteDefense(targetId)) break;
-        if (this._tryExplosionNull(targetId)) break;
         const mult = getAttributeMultiplier(card.attribute, target.currentAttribute);
         const dmg = Math.round(BASE_DAMAGE.explosion * mult);
         target.hp -= dmg;
@@ -489,7 +445,6 @@ class GameRoom {
 
       case 'paralysis': {
         if (this._tryAbsoluteDefense(targetId)) break;
-        if (this._tryParalysisNull(targetId)) break;
         if (hitRoll(PARALYSIS_HIT_RATE)) {
           target.isParalyzed = true;
           this._emitAll('game_update', {
@@ -535,40 +490,6 @@ class GameRoom {
     });
     setTimeout(() => {
       this._emitAll('battle_effect', { type: 'absolute_defense', targetId, card: { imageUrl: defCard.imageUrl, name: defCard.name || null } });
-    }, 2800);
-    return true;
-  }
-
-  _tryExplosionNull(targetId) {
-    const target = this.players.get(targetId);
-    const idx = target.hand.findIndex(c => c.effect === 'explosion_null');
-    if (idx === -1) return false;
-    const defCard = target.hand[idx];
-    target.hand.splice(idx, 1);
-    this._emitTo(targetId, 'hand_update', { hand: target.hand });
-    this._emitAll('game_update', {
-      state: this.getPublicState(),
-      log: `${target.nickname} の攻撃無効が発動！攻撃を防いだ！`,
-    });
-    setTimeout(() => {
-      this._emitAll('battle_effect', { type: 'explosion_null', targetId, card: { imageUrl: defCard.imageUrl, name: defCard.name || null } });
-    }, 2800);
-    return true;
-  }
-
-  _tryParalysisNull(targetId) {
-    const target = this.players.get(targetId);
-    const idx = target.hand.findIndex(c => c.effect === 'paralysis_null');
-    if (idx === -1) return false;
-    const defCard = target.hand[idx];
-    target.hand.splice(idx, 1);
-    this._emitTo(targetId, 'hand_update', { hand: target.hand });
-    this._emitAll('game_update', {
-      state: this.getPublicState(),
-      log: `${target.nickname} の麻痺無効が発動！麻痺を防いだ！`,
-    });
-    setTimeout(() => {
-      this._emitAll('battle_effect', { type: 'paralysis_null', targetId, card: { imageUrl: defCard.imageUrl, name: defCard.name || null } });
     }, 2800);
     return true;
   }

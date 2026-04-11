@@ -21,8 +21,6 @@ const EFFECT_CONFIG = {
   paralysis:  { emoji: '⚡', label: '麻痺！', bg: 'linear-gradient(135deg,#ffd600,#ff9800)', color: '#000', glow: '#ffd600' },
   heal:             { emoji: '💚', label: '回復！',    bg: 'linear-gradient(135deg,#00e676,#1b5e20)', color: '#fff', glow: '#00e676' },
   absolute_defense:  { emoji: '🛡️', label: '絶対防御！', bg: 'linear-gradient(135deg,#1565c0,#0d47a1)', color: '#fff', glow: '#1e88e5' },
-  explosion_null:    { emoji: '🛡️', label: '攻撃無効！', bg: 'linear-gradient(135deg,#37474f,#263238)', color: '#fff', glow: '#546e7a' },
-  paralysis_null:    { emoji: '🛡️', label: '麻痺無効！', bg: 'linear-gradient(135deg,#f57f17,#e65100)', color: '#fff', glow: '#ffa000' },
   explosion_reflect: { emoji: '🔄', label: '攻撃反射！', bg: 'linear-gradient(135deg,#e94560,#9c27b0)', color: '#fff', glow: '#e94560' },
   poison_reflect:    { emoji: '🔄', label: '毒反射！',   bg: 'linear-gradient(135deg,#9c27b0,#4a148c)', color: '#fff', glow: '#9c27b0' },
   paralysis_reflect: { emoji: '🔄', label: '麻痺反射！', bg: 'linear-gradient(135deg,#ffd600,#ff6d00)', color: '#000', glow: '#ffd600' },
@@ -163,7 +161,7 @@ export default function BattlePage({ initData, onExit }) {
       setCanPass(cp || false);
       // タイムアウト等でサーバーが自動処理した場合、残っているプロンプトを閉じる
       setPrompt(prev =>
-        prev && ['reflect', 'poison_null', 'heal_target'].includes(prev.type) ? null : prev
+        prev && ['reflect', 'heal_target'].includes(prev.type) ? null : prev
       );
       clearInterval(timerRef.current);
     });
@@ -180,11 +178,6 @@ export default function BattlePage({ initData, onExit }) {
     socket.on('reflect_prompt', ({ effectType, attribute, attackerId, attackerNickname }) => {
       setPrompt({ type: 'reflect', effectType, attribute, attackerId, attackerNickname });
       startTimer(20);
-    });
-
-    socket.on('poison_null_prompt', () => {
-      setPrompt({ type: 'poison_null' });
-      startTimer(10);
     });
 
     socket.on('heal_target_prompt', ({ teammates }) => {
@@ -235,7 +228,7 @@ export default function BattlePage({ initData, onExit }) {
 
     return () => {
       ['hand_update','turn_start','game_update','your_turn','reflect_prompt',
-       'poison_null_prompt','heal_target_prompt','game_over','battle_effect',
+       'heal_target_prompt','game_over','battle_effect',
        'player_disconnected','rematch_vote_update','rematch_cancelled','game_started'].forEach(e => socket.off(e));
     };
   }, [myId]);
@@ -295,12 +288,6 @@ export default function BattlePage({ initData, onExit }) {
   function handleReflect(doReflect) {
     clearInterval(timerRef.current);
     socket.emit('reflect_response', { doReflect });
-    setPrompt(null);
-  }
-
-  function handlePoisonNull(use) {
-    clearInterval(timerRef.current);
-    socket.emit('poison_null_response', { use });
     setPrompt(null);
   }
 
@@ -516,19 +503,6 @@ export default function BattlePage({ initData, onExit }) {
                 </div>
                 <div className="timer-bar"><div className="timer-fill" style={{ width: `${timer}%` }} /></div>
                 <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>20秒以内に選択（未選択→受ける）</p>
-              </>
-            )}
-
-            {prompt.type === 'poison_null' && (
-              <>
-                <h3>☠️ 毒無効カード</h3>
-                <p>毒無効をドローしました。今すぐ使用して毒を治癒しますか？</p>
-                <div className="prompt-buttons">
-                  <button className="btn btn-primary" onClick={() => handlePoisonNull(true)}>使用する</button>
-                  <button className="btn btn-ghost" onClick={() => handlePoisonNull(false)}>使わない</button>
-                </div>
-                <div className="timer-bar"><div className="timer-fill" style={{ width: `${timer}%` }} /></div>
-                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>10秒以内に選択</p>
               </>
             )}
 

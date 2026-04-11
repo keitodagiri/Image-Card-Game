@@ -90,11 +90,6 @@ io.on('connection', (socket) => {
     if (room) room.handleReflectResponse(socket.id, doReflect);
   });
 
-  socket.on('poison_null_response', ({ use }) => {
-    const room = roomManager.getRoomBySocketId(socket.id);
-    if (room) room.handlePoisonNullResponse(socket.id, use);
-  });
-
   socket.on('heal_target_select', ({ targetId }) => {
     const room = roomManager.getRoomBySocketId(socket.id);
     if (room) room.handleHealTargetSelect(socket.id, targetId);
