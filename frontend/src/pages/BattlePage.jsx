@@ -421,7 +421,7 @@ export default function BattlePage({ initData, onExit }) {
                 {isCurrent         && <span className="badge badge-turn">ターン中</span>}
                 {p.isPoisoned      && <span className="badge badge-poison">☠毒</span>}
                 {p.isParalyzed     && <span className="badge badge-paralysis">⚡麻痺</span>}
-                {p.isShielded      && <span className="badge" style={{ background: '#1565c0', color: '#fff' }}>🛡防御中</span>}
+                {p.isShielded && id === myId && <span className="badge" style={{ background: '#1565c0', color: '#fff' }}>🛡防御中</span>}
                 {p.isEliminated    && <span className="badge" style={{ background: '#555', color: '#fff' }}>脱落</span>}
                 {mode === 'team'   && <span className={`badge ${p.team === 0 ? 'badge-team0' : 'badge-team1'}`}>チーム{p.team + 1}</span>}
               </div>
