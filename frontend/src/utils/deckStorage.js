@@ -5,7 +5,14 @@ const KEY = 'card_battle_deck';
 export function loadDeck() {
   try {
     const raw = localStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const deck = JSON.parse(raw);
+    // 無効なエフェクト（削除済み）や画像なしのカードを自動除去
+    const cleaned = deck.filter(c => EFFECT_MAP[c.effect] && c.imageUrl);
+    if (cleaned.length !== deck.length) {
+      localStorage.setItem(KEY, JSON.stringify(cleaned));
+    }
+    return cleaned;
   } catch {
     return [];
   }

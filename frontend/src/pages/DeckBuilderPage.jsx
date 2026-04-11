@@ -214,7 +214,7 @@ export default function DeckBuilderPage({ onBack }) {
 
           {error && <p className="error-msg">{error}</p>}
 
-          <button className="btn btn-primary" onClick={handleAddCard} disabled={uploading}>
+          <button className="btn btn-primary" onClick={handleAddCard} disabled={uploading || !imageUrl}>
             {editingId ? '✏ 保存' : '＋ デッキに追加'}
           </button>
           {editingId && (
