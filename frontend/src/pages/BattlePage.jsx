@@ -3,7 +3,7 @@ import socket from '../socket';
 import { EFFECT_MAP, ATTRIBUTES, CATEGORY_COLORS } from '../utils/gameConstants';
 
 const ATTR_LABEL = Object.fromEntries(ATTRIBUTES.map(a => [a.id, a.label]));
-const PLAYABLE = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible']);
+const PLAYABLE = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible', 'absolute_defense']);
 
 // エフェクト設定
 const EFFECT_CONFIG = {
@@ -279,8 +279,8 @@ export default function BattlePage({ initData, onExit }) {
       return;
     }
     setSelectedCard(card);
-    // heal は 1v1/battle_royale で自動自己ターゲット
-    if (card.effect === 'heal') {
+    // heal / absolute_defense は自動自己ターゲット
+    if (card.effect === 'heal' || card.effect === 'absolute_defense') {
       setSelectedTarget(myId);
     } else {
       // デフォルトターゲット: 最初の攻撃可能な相手
@@ -421,6 +421,7 @@ export default function BattlePage({ initData, onExit }) {
                 {isCurrent         && <span className="badge badge-turn">ターン中</span>}
                 {p.isPoisoned      && <span className="badge badge-poison">☠毒</span>}
                 {p.isParalyzed     && <span className="badge badge-paralysis">⚡麻痺</span>}
+                {p.isShielded      && <span className="badge" style={{ background: '#1565c0', color: '#fff' }}>🛡防御中</span>}
                 {p.isEliminated    && <span className="badge" style={{ background: '#555', color: '#fff' }}>脱落</span>}
                 {mode === 'team'   && <span className={`badge ${p.team === 0 ? 'badge-team0' : 'badge-team1'}`}>チーム{p.team + 1}</span>}
               </div>

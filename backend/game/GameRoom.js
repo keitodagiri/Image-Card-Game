@@ -22,7 +22,7 @@ const CARD_NAMES = {
 const ATTR_NAMES = { fire: '🔥火', water: '💧水', grass: '🌿草', dark: '🌑闇', light: '✨光' };
 
 // プレイヤーがアクションで直接使えるカード
-const ACTIVE_EFFECTS = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible']);
+const ACTIVE_EFFECTS = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible', 'absolute_defense']);
 
 class GameRoom {
   constructor(roomCode, hostId, hostNickname) {
@@ -53,8 +53,11 @@ class GameRoom {
       isPoisoned: false,
       isParalyzed: false,
       isEliminated: false,
+      isShielded: false,
+      shieldCardImage: null,
+      shieldCardName: null,
       team: -1,
-      lobbyTeam: -1, // ロビーでの選択チーム（0 or 1、未選択は-1）
+      lobbyTeam: -1,
       currentAttribute: null,
     });
     this.joinOrder.push(id);
@@ -126,6 +129,9 @@ class GameRoom {
       p.isPoisoned = false;
       p.isParalyzed = false;
       p.isEliminated = false;
+      p.isShielded = false;
+      p.shieldCardImage = null;
+      p.shieldCardName = null;
       p.currentAttribute = null;
       p.team = this.mode === 'team' ? (p.lobbyTeam !== -1 ? p.lobbyTeam : idx % 2) : -1;
 
@@ -153,9 +159,8 @@ class GameRoom {
     if (!currentId) return;
     const p = this.players.get(currentId);
 
-    // 使った枚数(1)+1 = 2枚ドロー
+    // 毎ターン1枚ドロー
     this._drawCard(currentId);
-    const drawn = this._drawCard(currentId);
 
     // 使用可能なカードがなければ追加で1枚ドロー
     const hasPlayable = p.hand.some(c => ACTIVE_EFFECTS.has(c.effect));
@@ -220,19 +225,7 @@ class GameRoom {
     }
 
     const player = this.players.get(socketId);
-
-    // heal かつ非チーム戦の場合、targetId を強制的に自分にする
-    if (!targetId || (/* heal自己対象 */ false)) {}
-    const effectiveTargetId =
-      (targetId === undefined || targetId === null || targetId === '')
-        ? socketId
-        : targetId;
-
-    const target = this.players.get(effectiveTargetId);
-    if (!player || !target || target.isEliminated) {
-      console.log(`[handlePlayCard] rejected: player=${!!player} target=${!!target} elim=${target?.isEliminated} targetId=${effectiveTargetId}`);
-      return;
-    }
+    if (!player) return;
 
     const cardIdx = player.hand.findIndex(c => c.instanceId === cardInstanceId);
     if (cardIdx === -1) {
@@ -247,15 +240,27 @@ class GameRoom {
       return;
     }
 
-    // heal以外は自分をターゲットにできない
-    if (card.effect !== 'heal' && socketId === effectiveTargetId) {
-      console.log(`[handlePlayCard] rejected: non-heal self-target`);
+    // heal / absolute_defense は強制自己対象、それ以外はtargetId使用
+    const isSelfTarget = card.effect === 'heal' || card.effect === 'absolute_defense';
+    const effectiveTargetId = isSelfTarget
+      ? socketId
+      : (targetId === undefined || targetId === null || targetId === '') ? socketId : targetId;
+
+    const target = this.players.get(effectiveTargetId);
+    if (!target || (!isSelfTarget && target.isEliminated)) {
+      console.log(`[handlePlayCard] rejected: target=${!!target} elim=${target?.isEliminated} targetId=${effectiveTargetId}`);
+      return;
+    }
+
+    // 攻撃系は自分をターゲットにできない
+    if (!isSelfTarget && socketId === effectiveTargetId) {
+      console.log(`[handlePlayCard] rejected: non-self card targeting self`);
       return;
     }
 
     // チーム戦でhealは自チームのみ
     if (card.effect === 'heal' && this.mode === 'team') {
-      if (!target || target.team !== player.team) {
+      if (target.team !== player.team) {
         console.log(`[handlePlayCard] rejected: heal wrong team`);
         return;
       }
@@ -289,11 +294,12 @@ class GameRoom {
 
     // カード使用時に即エフェクト表示（反射待ちの場合も含む）
     const effectAnnouncements = {
-      explosion:  `${player.nickname}が${target.nickname}を攻撃！`,
-      invincible: `${player.nickname}が${target.nickname}に無敵技！`,
-      poison:     `${player.nickname}が${target.nickname}に毒！`,
-      paralysis:  `${player.nickname}が${target.nickname}に麻痺！`,
-      heal:       `${player.nickname}がHPを回復！`,
+      explosion:        `${player.nickname}が${target.nickname}を攻撃！`,
+      invincible:       `${player.nickname}が${target.nickname}に無敵技！`,
+      poison:           `${player.nickname}が${target.nickname}に毒！`,
+      paralysis:        `${player.nickname}が${target.nickname}に麻痺！`,
+      heal:             `${player.nickname}がHPを回復！`,
+      absolute_defense: `${player.nickname}が絶対防御を構えた！`,
     };
     this._emitAll('battle_effect', {
       type: card.effect,
@@ -533,6 +539,18 @@ class GameRoom {
         });
         break;
       }
+
+      case 'absolute_defense': {
+        // 自分のターンに使用 → シールド状態をセット
+        source.isShielded = true;
+        source.shieldCardImage = card.imageUrl || null;
+        source.shieldCardName  = card.name || null;
+        this._emitAll('game_update', {
+          state: this.getPublicState(),
+          log: `${source.nickname} が絶対防御を構えた！次の攻撃を1回防ぐ`,
+        });
+        break;
+      }
     }
 
     if (defenseTookOver) return; // _tryAbsoluteDefense がタイマーで _advanceTurn を呼ぶ
@@ -545,11 +563,13 @@ class GameRoom {
 
   _tryAbsoluteDefense(targetId) {
     const target = this.players.get(targetId);
-    const idx = target.hand.findIndex(c => c.effect === 'absolute_defense');
-    if (idx === -1) return false;
-    const defCard = target.hand[idx];
-    target.hand.splice(idx, 1);
-    this._emitTo(targetId, 'hand_update', { hand: target.hand });
+    if (!target.isShielded) return false;
+    // シールド解除
+    target.isShielded = false;
+    const shieldImg  = target.shieldCardImage;
+    const shieldName = target.shieldCardName;
+    target.shieldCardImage = null;
+    target.shieldCardName  = null;
     this._emitAll('game_update', {
       state: this.getPublicState(),
       log: `${target.nickname} の絶対防御が発動！攻撃を完全に防いだ！`,
@@ -559,7 +579,7 @@ class GameRoom {
       this._emitAll('battle_effect', {
         type: 'absolute_defense',
         targetId,
-        card: { imageUrl: defCard.imageUrl, name: defCard.name || null },
+        card: shieldImg ? { imageUrl: shieldImg, name: shieldName } : null,
         announcement: `${target.nickname}が絶対防御！`,
       });
       setTimeout(() => {
@@ -664,6 +684,9 @@ class GameRoom {
       p.isPoisoned = false;
       p.isParalyzed = false;
       p.isEliminated = false;
+      p.isShielded = false;
+      p.shieldCardImage = null;
+      p.shieldCardName = null;
       p.currentAttribute = null;
       p.team = this.mode === 'team' ? (p.lobbyTeam !== -1 ? p.lobbyTeam : idx % 2) : -1;
       p.deck = this._shuffle([...p.deckTemplate]);
@@ -724,6 +747,7 @@ class GameRoom {
           isPoisoned: p.isPoisoned,
           isParalyzed: p.isParalyzed,
           isEliminated: p.isEliminated,
+          isShielded: p.isShielded,
           team: p.team,
           currentAttribute: p.currentAttribute,
         };
