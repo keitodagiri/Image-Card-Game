@@ -51,6 +51,22 @@ function BattleEffectLayer({ effects }) {
             animation: 'effectPop 2.8s ease forwards',
             background: `radial-gradient(ellipse at center, ${cfg.glow}33 0%, transparent 70%)`,
           }}>
+            {/* アナウンステキスト */}
+            {ef.announcement && (
+              <div style={{
+                fontSize: 'clamp(22px, 5vw, 40px)',
+                fontWeight: 900,
+                color: '#fff',
+                textShadow: `0 0 24px ${cfg.glow}, 0 0 48px ${cfg.glow}`,
+                animation: 'announcePop 2.8s ease forwards',
+                textAlign: 'center',
+                padding: '0 20px',
+                letterSpacing: '0.04em',
+              }}>
+                {ef.announcement}
+              </div>
+            )}
+
             {/* カード画像・名前 */}
             {ef.card?.imageUrl && (
               <div style={{
@@ -58,7 +74,7 @@ function BattleEffectLayer({ effects }) {
                 flexDirection: 'column',
                 alignItems: 'center',
                 gap: 16,
-                animation: 'cardReveal 2.8s ease forwards',
+                animation: 'cardRevealDelayed 2.8s ease forwards',
               }}>
                 <img
                   src={ef.card.imageUrl}
@@ -99,6 +115,7 @@ function BattleEffectLayer({ effects }) {
               boxShadow: `0 0 40px ${cfg.glow}, 0 0 80px ${cfg.glow}66`,
               fontWeight: 900,
               fontFamily: 'inherit',
+              animation: ef.announcement ? 'cardRevealDelayed 2.8s ease forwards' : undefined,
             }}>
               <span style={{ fontSize: 48 }}>{cfg.emoji}</span>
               <span style={{ fontSize: 'clamp(18px, 4vw, 26px)', letterSpacing: '0.06em' }}>{cfg.label}</span>

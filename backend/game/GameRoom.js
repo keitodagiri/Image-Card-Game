@@ -183,7 +183,7 @@ class GameRoom {
         state: this.getPublicState(),
         log: `${p.nickname} が毒ダメージ ${dmg} を受けた！ (HP: ${Math.max(0, p.hp)})`,
       });
-      this._emitAll('battle_effect', { type: 'poison_dot', targetId: playerId, damage: dmg });
+      this._emitAll('battle_effect', { type: 'poison_dot', targetId: playerId, damage: dmg, announcement: `${p.nickname}が毒ダメージ！` });
       if (p.hp <= 0) {
         this._eliminatePlayer(playerId, '毒ダメージ');
         if (this._checkGameOver()) return;
@@ -273,11 +273,19 @@ class GameRoom {
     });
 
     // カード使用時に即エフェクト表示（反射待ちの場合も含む）
+    const effectAnnouncements = {
+      explosion:  `${player.nickname}が${target.nickname}を攻撃！`,
+      invincible: `${player.nickname}が${target.nickname}に無敵技！`,
+      poison:     `${player.nickname}が${target.nickname}に毒！`,
+      paralysis:  `${player.nickname}が${target.nickname}に麻痺！`,
+      heal:       `${player.nickname}がHPを回復！`,
+    };
     this._emitAll('battle_effect', {
       type: card.effect,
       attribute: card.attribute || null,
       targetId: effectiveTargetId,
       card: { imageUrl: card.imageUrl, name: card.name || null },
+      announcement: effectAnnouncements[card.effect] || '',
     });
 
     // 反射チェック（爆発・毒・麻痺のみ）
@@ -362,6 +370,7 @@ class GameRoom {
             type: reflectEffectName,
             targetId,
             card: { imageUrl: defCard.imageUrl, name: defCard.name || null },
+            announcement: `${target.nickname}が${attacker.nickname}の攻撃を反射！`,
           });
         }
         // 反射カード表示（2800ms）の後：効果を適用
@@ -516,7 +525,7 @@ class GameRoom {
       log: `${target.nickname} の絶対防御が発動！攻撃を完全に防いだ！`,
     });
     setTimeout(() => {
-      this._emitAll('battle_effect', { type: 'absolute_defense', targetId, card: { imageUrl: defCard.imageUrl, name: defCard.name || null } });
+      this._emitAll('battle_effect', { type: 'absolute_defense', targetId, card: { imageUrl: defCard.imageUrl, name: defCard.name || null }, announcement: `${target.nickname}が絶対防御！` });
     }, 2800);
     return true;
   }
