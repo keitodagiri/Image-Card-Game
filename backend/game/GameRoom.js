@@ -336,14 +336,8 @@ class GameRoom {
             card: { imageUrl: defCard.imageUrl, name: defCard.name || null },
           });
         }
-        // 反射カード表示（2800ms）の後：反射された攻撃を表示
+        // 反射カード表示（2800ms）の後：効果を適用
         setTimeout(() => {
-          this._emitAll('battle_effect', {
-            type: card.effect,
-            attribute: card.attribute || null,
-            targetId: attackerId,
-            card: { imageUrl: card.imageUrl, name: card.name || null },
-          });
           this._applyEffect(card, targetId, attackerId);
         }, 2800);
       }, 2800);
