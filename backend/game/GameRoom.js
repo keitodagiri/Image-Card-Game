@@ -210,30 +210,58 @@ class GameRoom {
   // ─── カード使用 ────────────────────────────────────────────
 
   handlePlayCard(socketId, cardInstanceId, targetId) {
-    if (this.phase !== 'action') return;
-    if (this._getCurrentPlayerId() !== socketId) return;
+    if (this.phase !== 'action') {
+      console.log(`[handlePlayCard] rejected: phase=${this.phase} (not action)`);
+      return;
+    }
+    if (this._getCurrentPlayerId() !== socketId) {
+      console.log(`[handlePlayCard] rejected: not current player`);
+      return;
+    }
 
     const player = this.players.get(socketId);
-    const target = this.players.get(targetId);
-    if (!player || !target || target.isEliminated) return;
+
+    // heal かつ非チーム戦の場合、targetId を強制的に自分にする
+    if (!targetId || (/* heal自己対象 */ false)) {}
+    const effectiveTargetId =
+      (targetId === undefined || targetId === null || targetId === '')
+        ? socketId
+        : targetId;
+
+    const target = this.players.get(effectiveTargetId);
+    if (!player || !target || target.isEliminated) {
+      console.log(`[handlePlayCard] rejected: player=${!!player} target=${!!target} elim=${target?.isEliminated} targetId=${effectiveTargetId}`);
+      return;
+    }
 
     const cardIdx = player.hand.findIndex(c => c.instanceId === cardInstanceId);
-    if (cardIdx === -1) return;
+    if (cardIdx === -1) {
+      console.log(`[handlePlayCard] rejected: card not in hand`);
+      return;
+    }
     const card = player.hand[cardIdx];
 
     // アクション可能なカードのみ使用可
-    if (!ACTIVE_EFFECTS.has(card.effect)) return;
+    if (!ACTIVE_EFFECTS.has(card.effect)) {
+      console.log(`[handlePlayCard] rejected: effect not active ${card.effect}`);
+      return;
+    }
 
     // heal以外は自分をターゲットにできない
-    if (card.effect !== 'heal' && socketId === targetId) return;
+    if (card.effect !== 'heal' && socketId === effectiveTargetId) {
+      console.log(`[handlePlayCard] rejected: non-heal self-target`);
+      return;
+    }
 
     // チーム戦でhealは自チームのみ
     if (card.effect === 'heal' && this.mode === 'team') {
-      const targetPlayer = this.players.get(targetId);
-      if (!targetPlayer || targetPlayer.team !== player.team) return;
+      if (!target || target.team !== player.team) {
+        console.log(`[handlePlayCard] rejected: heal wrong team`);
+        return;
+      }
     }
 
-    // チーム戦でも攻撃系カードは仲間を含む全プレイヤーをターゲット可
+    console.log(`[handlePlayCard] OK effect=${card.effect} mode=${this.mode} target=${effectiveTargetId}`);
 
     player.hand.splice(cardIdx, 1);
     this._emitTo(socketId, 'hand_update', { hand: player.hand });
@@ -248,7 +276,7 @@ class GameRoom {
     this._emitAll('battle_effect', {
       type: card.effect,
       attribute: card.attribute || null,
-      targetId,
+      targetId: effectiveTargetId,
       card: { imageUrl: card.imageUrl, name: card.name || null },
     });
 
@@ -259,7 +287,7 @@ class GameRoom {
 
     if (canReflect) {
       this.phase = 'reflect_choice';
-      this._emitTo(targetId, 'reflect_prompt', {
+      this._emitTo(effectiveTargetId, 'reflect_prompt', {
         effectType: card.effect,
         attribute: card.attribute || null,
         attackerId: socketId,
@@ -269,7 +297,7 @@ class GameRoom {
         type: 'reflect_choice',
         card,
         attackerId: socketId,
-        targetId,
+        targetId: effectiveTargetId,
         timeout: setTimeout(() => {
           if (this.pendingAction?.type === 'reflect_choice') {
             const pa = this.pendingAction;
@@ -281,7 +309,7 @@ class GameRoom {
     } else if (card.effect === 'heal' && this.mode === 'team') {
       this._promptHealTarget(socketId, card);
     } else {
-      this._applyEffect(card, socketId, targetId);
+      this._applyEffect(card, socketId, effectiveTargetId);
     }
   }
 
@@ -391,6 +419,11 @@ class GameRoom {
   _applyEffect(card, sourceId, targetId) {
     const target = this.players.get(targetId);
     const source = this.players.get(sourceId);
+    if (!target || !source) {
+      console.error(`[_applyEffect] null player: source=${sourceId} target=${targetId} effect=${card.effect}`);
+      this._advanceTurn();
+      return;
+    }
 
     if (card.effect === 'explosion' && card.attribute) {
       source.currentAttribute = card.attribute;
