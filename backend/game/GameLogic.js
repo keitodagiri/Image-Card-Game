@@ -1,24 +1,3 @@
-// 属性相性テーブル: key が攻撃属性、value が「有利に取れる」防御属性
-const ATTRIBUTE_ADVANTAGE = {
-  fire: 'grass',
-  water: 'fire',
-  grass: 'water',
-  dark: 'light',
-  light: 'dark',
-};
-
-/**
- * 属性倍率を返す
- * attackAttr: 攻撃カードの属性
- * defenderAttr: 防御側プレイヤーの現在属性（最後に使った爆発カードの属性）
- */
-function getAttributeMultiplier(attackAttr, defenderAttr) {
-  if (!attackAttr || !defenderAttr) return 1;
-  if (ATTRIBUTE_ADVANTAGE[attackAttr] === defenderAttr) return 2;
-  if (ATTRIBUTE_ADVANTAGE[defenderAttr] === attackAttr) return 0.5;
-  return 1;
-}
-
 const BASE_DAMAGE = {
   explosion: 25,
   invincible: 40,
@@ -48,7 +27,6 @@ function hitRoll(rate) {
 }
 
 module.exports = {
-  getAttributeMultiplier,
   BASE_DAMAGE,
   INITIAL_HP,
   HAND_SIZE,

@@ -1,20 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import socket from '../socket';
-import { EFFECT_MAP, ATTRIBUTES, CATEGORY_COLORS } from '../utils/gameConstants';
-
-const ATTR_LABEL = Object.fromEntries(ATTRIBUTES.map(a => [a.id, a.label]));
+import { EFFECT_MAP, CATEGORY_COLORS } from '../utils/gameConstants';
 const PLAYABLE = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible', 'absolute_defense']);
 
 // エフェクト設定
 const EFFECT_CONFIG = {
-  explosion: {
-    fire:  { emoji: '🔥', label: '攻撃', bg: 'linear-gradient(135deg,#ff6b35,#f7c948)', color: '#000', glow: '#ff6b35' },
-    water: { emoji: '💧', label: '攻撃', bg: 'linear-gradient(135deg,#2196f3,#00e5ff)', color: '#000', glow: '#2196f3' },
-    grass: { emoji: '🌿', label: '攻撃', bg: 'linear-gradient(135deg,#00e676,#76ff03)', color: '#000', glow: '#00e676' },
-    dark:  { emoji: '🌑', label: '攻撃', bg: 'linear-gradient(135deg,#9c27b0,#4a148c)', color: '#fff', glow: '#9c27b0' },
-    light: { emoji: '✨', label: '攻撃', bg: 'linear-gradient(135deg,#ffd600,#fff9c4)', color: '#000', glow: '#ffd600' },
-    default: { emoji: '💥', label: '攻撃', bg: 'linear-gradient(135deg,#e94560,#ff6b8a)', color: '#fff', glow: '#e94560' },
-  },
+  explosion: { emoji: '💥', label: '攻撃！', bg: 'linear-gradient(135deg,#e94560,#ff6b8a)', color: '#fff', glow: '#e94560' },
   invincible: { emoji: '⚡', label: '無敵技！', bg: 'linear-gradient(135deg,#ffd600,#ff6d00)', color: '#000', glow: '#ffd600' },
   poison:     { emoji: '☠️', label: '毒！', bg: 'linear-gradient(135deg,#9c27b0,#6a1b9a)', color: '#fff', glow: '#9c27b0' },
   poison_dot: { emoji: '☠️', label: '毒ダメージ', bg: 'linear-gradient(135deg,#7b1fa2,#4a148c)', color: '#fff', glow: '#7b1fa2' },
@@ -27,8 +18,7 @@ const EFFECT_CONFIG = {
   miss:              { emoji: '💨', label: 'ミス！',     bg: 'linear-gradient(135deg,#455a64,#263238)', color: '#fff', glow: '#607d8b' },
 };
 
-function getEffectConfig(type, attribute) {
-  if (type === 'explosion') return EFFECT_CONFIG.explosion[attribute] || EFFECT_CONFIG.explosion.default;
+function getEffectConfig(type) {
   return EFFECT_CONFIG[type] || EFFECT_CONFIG.miss;
 }
 
@@ -38,7 +28,7 @@ function BattleEffectLayer({ effects }) {
   return (
     <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', zIndex: 200 }}>
       {effects.map(ef => {
-        const cfg = getEffectConfig(ef.type, ef.attribute);
+        const cfg = getEffectConfig(ef.type);
         return (
           <div key={ef.id} style={{
             position: 'fixed',
@@ -124,12 +114,6 @@ function BattleEffectLayer({ effects }) {
               )}
               {ef.amount != null && (
                 <span style={{ fontSize: 'clamp(36px, 8vw, 56px)', lineHeight: 1 }}>+{ef.amount}</span>
-              )}
-              {ef.multiplier === 2 && (
-                <span style={{ fontSize: 16, background: 'rgba(0,0,0,0.35)', padding: '4px 12px', borderRadius: 10 }}>属性有利 ×2!</span>
-              )}
-              {ef.multiplier === 0.5 && (
-                <span style={{ fontSize: 16, background: 'rgba(0,0,0,0.35)', padding: '4px 12px', borderRadius: 10 }}>属性不利 ×0.5</span>
               )}
               {ef.hit === false && (
                 <span style={{ fontSize: 16 }}>外れた！</span>
@@ -348,6 +332,7 @@ export default function BattlePage({ initData, onExit }) {
 
   function isTargetable(id) {
     if (!isMyTurn || !selectedCard) return false;
+    if (selectedCard.effect === 'absolute_defense') return id === myId;
     if (selectedCard.effect === 'heal') return getHealTargets().includes(id);
     return getAttackTargets(selectedCard).includes(id);
   }
@@ -355,10 +340,7 @@ export default function BattlePage({ initData, onExit }) {
   // ─── ユーティリティ ───────────────────────────────────────
 
   function getEffectLabel(card) {
-    const e = EFFECT_MAP[card.effect];
-    let label = e?.label || card.effect;
-    if (card.attribute) label += ` ${ATTR_LABEL[card.attribute] || card.attribute}`;
-    return label;
+    return EFFECT_MAP[card.effect]?.label || card.effect;
   }
 
   function getHpColor(hp) {
@@ -451,7 +433,6 @@ export default function BattlePage({ initData, onExit }) {
                 <img src={card.imageUrl} alt="" />
                 {card.name && <div className="hand-card-label" style={{ color: 'var(--text)', fontSize: 9 }}>{card.name}</div>}
                 <div className="hand-card-label" style={{ color }}>{EFFECT_MAP[card.effect]?.label || card.effect}</div>
-                {card.attribute && <div className="hand-card-attr">{ATTR_LABEL[card.attribute]}</div>}
               </div>
             );
           })}
@@ -512,8 +493,7 @@ export default function BattlePage({ initData, onExit }) {
               <>
                 <h3>⚡ 反射できます！</h3>
                 <p>
-                  {prompt.attackerNickname} の「{EFFECT_MAP[prompt.effectType]?.label}
-                  {prompt.attribute ? ` ${ATTR_LABEL[prompt.attribute]}` : ''}」を反射しますか？
+                  {prompt.attackerNickname} の「{EFFECT_MAP[prompt.effectType]?.label}」を反射しますか？
                 </p>
                 <div className="prompt-buttons">
                   <button className="btn btn-primary" onClick={() => handleReflect(true)}>反射する</button>

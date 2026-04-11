@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { EFFECTS, ATTRIBUTES, EFFECT_MAP, CATEGORY_COLORS } from '../utils/gameConstants';
+import { EFFECTS, EFFECT_MAP, CATEGORY_COLORS } from '../utils/gameConstants';
 import { loadDeck, saveDeck, addCard, removeCard, canAddCard } from '../utils/deckStorage';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -10,7 +10,6 @@ export default function DeckBuilderPage({ onBack }) {
   const [imageUrl, setImageUrl] = useState('');
   const [imagePreview, setImagePreview] = useState('');
   const [selectedEffect, setSelectedEffect] = useState(null);
-  const [selectedAttr, setSelectedAttr] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState(null);
@@ -44,7 +43,6 @@ export default function DeckBuilderPage({ onBack }) {
     setImageUrl('');
     setImagePreview('');
     setSelectedEffect(null);
-    setSelectedAttr(null);
     setError('');
     setEditingId(null);
     fileRef.current.value = '';
@@ -56,7 +54,6 @@ export default function DeckBuilderPage({ onBack }) {
     setImageUrl(card.imageUrl);
     setImagePreview(card.imageUrl);
     setSelectedEffect(card.effect);
-    setSelectedAttr(card.attribute || null);
     setError('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -64,13 +61,12 @@ export default function DeckBuilderPage({ onBack }) {
   function handleAddCard() {
     if (!imageUrl)        { setError('画像をアップロードしてください'); return; }
     if (!selectedEffect)  { setError('効果を選んでください'); return; }
-    if (selectedEffect === 'explosion' && !selectedAttr) { setError('属性を選んでください'); return; }
 
     if (editingId) {
       // 編集モード: 既存カードを更新
       const newDeck = deck.map(c =>
         c.id === editingId
-          ? { ...c, name: cardName.trim() || null, imageUrl, effect: selectedEffect, attribute: selectedEffect === 'explosion' ? selectedAttr : null }
+          ? { ...c, name: cardName.trim() || null, imageUrl, effect: selectedEffect }
           : c
       );
       setDeck(newDeck);
@@ -87,7 +83,6 @@ export default function DeckBuilderPage({ onBack }) {
       name: cardName.trim() || null,
       imageUrl,
       effect: selectedEffect,
-      attribute: selectedEffect === 'explosion' ? selectedAttr : null,
     });
     setDeck(newDeck);
     saveDeck(newDeck);
@@ -195,23 +190,6 @@ export default function DeckBuilderPage({ onBack }) {
             )}
           </div>
 
-          {selectedEffect === 'explosion' && (
-            <div>
-              <label>属性（攻撃のみ必須）</label>
-              <div className="attr-grid">
-                {ATTRIBUTES.map(a => (
-                  <button
-                    key={a.id}
-                    className={`attr-btn ${selectedAttr === a.id ? 'selected' : ''}`}
-                    onClick={() => setSelectedAttr(a.id)}
-                  >
-                    {a.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
           {error && <p className="error-msg">{error}</p>}
 
           <button className="btn btn-primary" onClick={handleAddCard} disabled={uploading || !imageUrl}>
@@ -240,11 +218,6 @@ export default function DeckBuilderPage({ onBack }) {
                       <div className="deck-card-effect" style={{ color: CATEGORY_COLORS[EFFECT_MAP[card.effect]?.category] }}>
                         {EFFECT_MAP[card.effect]?.label || card.effect}
                       </div>
-                      {card.attribute && (
-                        <div className="deck-card-attr">
-                          {ATTRIBUTES.find(a => a.id === card.attribute)?.label}
-                        </div>
-                      )}
                     </div>
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: 12 }} onClick={() => handleEdit(card)}>

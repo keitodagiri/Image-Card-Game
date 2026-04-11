@@ -1,6 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
 const {
-  getAttributeMultiplier,
   BASE_DAMAGE,
   INITIAL_HP,
   HAND_SIZE,
@@ -19,7 +18,6 @@ const CARD_NAMES = {
   explosion_reflect: '攻撃反射', poison_reflect: '毒反射', paralysis_reflect: '麻痺反射',
   invincible: '無敵技', absolute_defense: '絶対防御',
 };
-const ATTR_NAMES = { fire: '🔥火', water: '💧水', grass: '🌿草', dark: '🌑闇', light: '✨光' };
 
 // プレイヤーがアクションで直接使えるカード
 const ACTIVE_EFFECTS = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible', 'absolute_defense']);
@@ -58,7 +56,6 @@ class GameRoom {
       shieldCardName: null,
       team: -1,
       lobbyTeam: -1,
-      currentAttribute: null,
     });
     this.joinOrder.push(id);
   }
@@ -132,7 +129,6 @@ class GameRoom {
       p.isShielded = false;
       p.shieldCardImage = null;
       p.shieldCardName = null;
-      p.currentAttribute = null;
       p.team = this.mode === 'team' ? (p.lobbyTeam !== -1 ? p.lobbyTeam : idx % 2) : -1;
 
       const rawDeck = playerDecks.get(id) || [];
@@ -280,8 +276,7 @@ class GameRoom {
     // エフェクト表示用データを事前計算
     const preCalc = {};
     if (card.effect === 'explosion') {
-      preCalc.mult   = getAttributeMultiplier(card.attribute, target.currentAttribute);
-      preCalc.damage = Math.round(BASE_DAMAGE.explosion * preCalc.mult);
+      preCalc.damage = BASE_DAMAGE.explosion;
     } else if (card.effect === 'invincible') {
       preCalc.damage = BASE_DAMAGE.invincible;
     } else if (card.effect === 'poison') {
@@ -303,14 +298,12 @@ class GameRoom {
     };
     this._emitAll('battle_effect', {
       type: card.effect,
-      attribute: card.attribute || null,
       targetId: effectiveTargetId,
       card: { imageUrl: card.imageUrl, name: card.name || null },
       announcement: effectAnnouncements[card.effect] || '',
-      damage:     preCalc.damage,
-      multiplier: preCalc.mult,
-      hit:        preCalc.hit,
-      amount:     preCalc.amount,
+      damage: preCalc.damage,
+      hit:    preCalc.hit,
+      amount: preCalc.amount,
     });
 
     // 反射チェック（爆発・毒・麻痺のみ）
@@ -469,23 +462,17 @@ class GameRoom {
       return;
     }
 
-    if (card.effect === 'explosion' && card.attribute) {
-      source.currentAttribute = card.attribute;
-    }
-
     let defenseTookOver = false;
 
     switch (card.effect) {
       case 'explosion': {
         if (this._tryAbsoluteDefense(targetId)) { defenseTookOver = true; break; }
-        const mult = preCalc.mult ?? getAttributeMultiplier(card.attribute, target.currentAttribute);
-        const dmg  = preCalc.damage ?? Math.round(BASE_DAMAGE.explosion * mult);
+        const dmg = preCalc.damage ?? BASE_DAMAGE.explosion;
         target.hp -= dmg;
-        let msg = `${target.nickname} に攻撃 ${dmg} ダメージ！`;
-        if (mult === 2)   msg += ' (属性有利 ×2)';
-        if (mult === 0.5) msg += ' (属性不利 ×0.5)';
-        msg += ` (HP: ${Math.max(0, target.hp)})`;
-        this._emitAll('game_update', { state: this.getPublicState(), log: msg });
+        this._emitAll('game_update', {
+          state: this.getPublicState(),
+          log: `${target.nickname} に攻撃 ${dmg} ダメージ！ (HP: ${Math.max(0, target.hp)})`,
+        });
         break;
       }
 
@@ -687,7 +674,6 @@ class GameRoom {
       p.isShielded = false;
       p.shieldCardImage = null;
       p.shieldCardName = null;
-      p.currentAttribute = null;
       p.team = this.mode === 'team' ? (p.lobbyTeam !== -1 ? p.lobbyTeam : idx % 2) : -1;
       p.deck = this._shuffle([...p.deckTemplate]);
       p.hand = [];
@@ -749,7 +735,6 @@ class GameRoom {
           isEliminated: p.isEliminated,
           isShielded: p.isShielded,
           team: p.team,
-          currentAttribute: p.currentAttribute,
         };
       }
     });
@@ -786,9 +771,7 @@ class GameRoom {
   }
 
   _cardLabel(card) {
-    let label = CARD_NAMES[card.effect] || card.effect;
-    if (card.attribute) label += `(${ATTR_NAMES[card.attribute] || card.attribute})`;
-    return label;
+    return CARD_NAMES[card.effect] || card.effect;
   }
 
   _emitAll(event, data) {
