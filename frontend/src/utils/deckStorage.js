@@ -1,43 +1,116 @@
 import { EFFECT_MAP } from './gameConstants';
 
-const KEY = 'card_battle_deck';
+const KEY = 'card_battle_decks';
+const LEGACY_KEY = 'card_battle_deck';
 
-export function loadDeck() {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return [];
-    const deck = JSON.parse(raw);
-    // 無効なエフェクト（削除済み）や画像なしのカードを自動除去
-    const cleaned = deck.filter(c => EFFECT_MAP[c.effect] && c.imageUrl);
-    if (cleaned.length !== deck.length) {
-      localStorage.setItem(KEY, JSON.stringify(cleaned));
-    }
-    return cleaned;
-  } catch {
-    return [];
-  }
-}
-
-export function saveDeck(deck) {
-  localStorage.setItem(KEY, JSON.stringify(deck));
-}
+export const MAX_DECK_SIZE = 15;
 
 function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
-export function addCard(deck, card) {
-  return [...deck, { ...card, id: generateId() }];
+function getStore() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const store = JSON.parse(raw);
+      if (store.decks && Array.isArray(store.decks)) return store;
+    }
+    // 旧フォーマットからマイグレーション
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy) {
+      const cards = JSON.parse(legacy);
+      if (Array.isArray(cards) && cards.length > 0) {
+        const deck = { id: generateId(), name: 'デッキ1', cards };
+        const store = { decks: [deck], activeDeckId: deck.id };
+        localStorage.setItem(KEY, JSON.stringify(store));
+        localStorage.removeItem(LEGACY_KEY);
+        return store;
+      }
+    }
+  } catch {}
+  return { decks: [], activeDeckId: null };
 }
 
-export function removeCard(deck, cardId) {
-  return deck.filter(c => c.id !== cardId);
+function saveStore(store) {
+  localStorage.setItem(KEY, JSON.stringify(store));
 }
 
-/** デッキに追加できるか検証 */
-export function canAddCard(deck, effect) {
+export function loadAllDecks() {
+  return getStore().decks;
+}
+
+export function getActiveDeck() {
+  const store = getStore();
+  const found = store.decks.find(d => d.id === store.activeDeckId);
+  return found || store.decks[0] || null;
+}
+
+export function setActiveDeck(id) {
+  const store = getStore();
+  store.activeDeckId = id;
+  saveStore(store);
+}
+
+export function createDeck(name) {
+  const store = getStore();
+  const deck = { id: generateId(), name: name || `デッキ${store.decks.length + 1}`, cards: [] };
+  store.decks.push(deck);
+  if (!store.activeDeckId) store.activeDeckId = deck.id;
+  saveStore(store);
+  return deck;
+}
+
+export function renameDeck(id, name) {
+  const store = getStore();
+  const deck = store.decks.find(d => d.id === id);
+  if (deck && name.trim()) {
+    deck.name = name.trim();
+    saveStore(store);
+  }
+}
+
+export function deleteDeck(id) {
+  const store = getStore();
+  store.decks = store.decks.filter(d => d.id !== id);
+  if (store.activeDeckId === id) {
+    store.activeDeckId = store.decks[0]?.id || null;
+  }
+  saveStore(store);
+  return store;
+}
+
+export function saveDeckCards(deckId, cards) {
+  const store = getStore();
+  const deck = store.decks.find(d => d.id === deckId);
+  if (deck) {
+    deck.cards = cards;
+    saveStore(store);
+  }
+}
+
+function cleanCards(cards) {
+  return cards.filter(c => EFFECT_MAP[c.effect] && c.imageUrl);
+}
+
+export function addCard(cards, card) {
+  return [...cards, { ...card, id: generateId() }];
+}
+
+export function removeCard(cards, cardId) {
+  return cards.filter(c => c.id !== cardId);
+}
+
+export function canAddCard(cards, effect) {
+  if (cards.length >= MAX_DECK_SIZE) return false;
   const limit = EFFECT_MAP[effect]?.deckLimit;
   if (limit == null) return true;
-  const count = deck.filter(c => c.effect === effect).length;
-  return count < limit;
+  return cards.filter(c => c.effect === effect).length < limit;
+}
+
+// LobbyPage用: アクティブデッキのカード配列を返す
+export function loadDeck() {
+  const deck = getActiveDeck();
+  if (!deck) return [];
+  return cleanCards(deck.cards);
 }

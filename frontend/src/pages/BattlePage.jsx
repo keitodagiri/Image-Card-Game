@@ -1,17 +1,20 @@
 import { useState, useEffect, useRef } from 'react';
 import socket from '../socket';
 import { EFFECT_MAP, CATEGORY_COLORS } from '../utils/gameConstants';
-const PLAYABLE = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible', 'absolute_defense']);
+const PLAYABLE = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible', 'antidote']);
+const DOUBLE_ATTACK_ELIGIBLE = new Set(['explosion']);
 
 // エフェクト設定
 const EFFECT_CONFIG = {
-  explosion: { emoji: '💥', label: '攻撃！', bg: 'linear-gradient(135deg,#e94560,#ff6b8a)', color: '#fff', glow: '#e94560' },
+  explosion:     { emoji: '💥', label: '攻撃！',   bg: 'linear-gradient(135deg,#e94560,#ff6b8a)', color: '#fff', glow: '#e94560' },
+  double_attack: { emoji: '⚔️', label: '二連撃！', bg: 'linear-gradient(135deg,#e94560,#b71c1c)', color: '#fff', glow: '#e94560' },
   invincible: { emoji: '⚡', label: '無敵技！', bg: 'linear-gradient(135deg,#ffd600,#ff6d00)', color: '#000', glow: '#ffd600' },
   poison:     { emoji: '☠️', label: '毒！', bg: 'linear-gradient(135deg,#9c27b0,#6a1b9a)', color: '#fff', glow: '#9c27b0' },
   poison_dot: { emoji: '☠️', label: '毒ダメージ', bg: 'linear-gradient(135deg,#7b1fa2,#4a148c)', color: '#fff', glow: '#7b1fa2' },
   paralysis:  { emoji: '⚡', label: '麻痺！', bg: 'linear-gradient(135deg,#ffd600,#ff9800)', color: '#000', glow: '#ffd600' },
   heal:             { emoji: '💚', label: '回復！',    bg: 'linear-gradient(135deg,#00e676,#1b5e20)', color: '#fff', glow: '#00e676' },
   absolute_defense:  { emoji: '🛡️', label: '絶対防御！', bg: 'linear-gradient(135deg,#1565c0,#0d47a1)', color: '#fff', glow: '#1e88e5' },
+  antidote:          { emoji: '💊', label: '解毒！',     bg: 'linear-gradient(135deg,#00bcd4,#006064)', color: '#fff', glow: '#00bcd4' },
   explosion_reflect: { emoji: '🔄', label: '攻撃反射！', bg: 'linear-gradient(135deg,#e94560,#9c27b0)', color: '#fff', glow: '#e94560' },
   poison_reflect:    { emoji: '🔄', label: '毒反射！',   bg: 'linear-gradient(135deg,#9c27b0,#4a148c)', color: '#fff', glow: '#9c27b0' },
   paralysis_reflect: { emoji: '🔄', label: '麻痺反射！', bg: 'linear-gradient(135deg,#ffd600,#ff6d00)', color: '#000', glow: '#ffd600' },
@@ -145,6 +148,8 @@ export default function BattlePage({ initData, onExit }) {
   const [rematchVotes, setRematchVotes] = useState({ votes: 0, total: 0 });
   const [myRematchVoted, setMyRematchVoted] = useState(false);
   const [canPass, setCanPass] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
+  const [useDoubleAttack, setUseDoubleAttack] = useState(false);
   const logRef  = useRef();
   const timerRef = useRef();
 
@@ -162,7 +167,7 @@ export default function BattlePage({ initData, onExit }) {
       setCanPass(cp || false);
       // タイムアウト等でサーバーが自動処理した場合、残っているプロンプトを閉じる
       setPrompt(prev =>
-        prev && ['reflect', 'heal_target'].includes(prev.type) ? null : prev
+        prev && ['reflect', 'defense', 'heal_target'].includes(prev.type) ? null : prev
       );
       clearInterval(timerRef.current);
     });
@@ -178,6 +183,11 @@ export default function BattlePage({ initData, onExit }) {
 
     socket.on('reflect_prompt', ({ effectType, attribute, attackerId, attackerNickname }) => {
       setPrompt({ type: 'reflect', effectType, attribute, attackerId, attackerNickname });
+      startTimer(20);
+    });
+
+    socket.on('defense_prompt', ({ effectType, attackerId, attackerNickname }) => {
+      setPrompt({ type: 'defense', effectType, attackerId, attackerNickname });
       startTimer(20);
     });
 
@@ -228,7 +238,7 @@ export default function BattlePage({ initData, onExit }) {
     });
 
     return () => {
-      ['hand_update','turn_start','game_update','your_turn','reflect_prompt',
+      ['hand_update','turn_start','game_update','your_turn','reflect_prompt','defense_prompt',
        'heal_target_prompt','game_over','battle_effect',
        'player_disconnected','rematch_vote_update','rematch_cancelled','game_started'].forEach(e => socket.off(e));
     };
@@ -263,8 +273,12 @@ export default function BattlePage({ initData, onExit }) {
       return;
     }
     setSelectedCard(card);
-    // heal / absolute_defense は自動自己ターゲット
-    if (card.effect === 'heal' || card.effect === 'absolute_defense') {
+    setUseDoubleAttack(false);
+    // heal は自動自己ターゲット
+    if (card.effect === 'heal') {
+      setSelectedTarget(myId);
+    } else if (card.effect === 'antidote') {
+      // antidote はデフォルト自分、任意の対象を選べる
       setSelectedTarget(myId);
     } else {
       // デフォルトターゲット: 最初の攻撃可能な相手
@@ -280,8 +294,9 @@ export default function BattlePage({ initData, onExit }) {
 
   function handleConfirm() {
     if (!selectedCard || !selectedTarget) return;
-    socket.emit('play_card', { cardInstanceId: selectedCard.instanceId, targetId: selectedTarget });
+    socket.emit('play_card', { cardInstanceId: selectedCard.instanceId, targetId: selectedTarget, useDoubleAttack });
     setIsMyTurn(false);
+    setUseDoubleAttack(false);
     setSelectedCard(null);
     setSelectedTarget(null);
   }
@@ -289,6 +304,12 @@ export default function BattlePage({ initData, onExit }) {
   function handleReflect(doReflect) {
     clearInterval(timerRef.current);
     socket.emit('reflect_response', { doReflect });
+    setPrompt(null);
+  }
+
+  function handleDefense(doDefend) {
+    clearInterval(timerRef.current);
+    socket.emit('defense_response', { doDefend });
     setPrompt(null);
   }
 
@@ -302,6 +323,7 @@ export default function BattlePage({ initData, onExit }) {
   const players = gameState?.players || {};
   const playerOrder = gameState?.playerOrder || [];
   const mode = gameState?.mode;
+  const turnCount = gameState?.turnCount ?? 0;
   const me = players[myId];
 
   function getAttackTargets(card) {
@@ -334,6 +356,11 @@ export default function BattlePage({ initData, onExit }) {
     if (!isMyTurn || !selectedCard) return false;
     if (selectedCard.effect === 'absolute_defense') return id === myId;
     if (selectedCard.effect === 'heal') return getHealTargets().includes(id);
+    if (selectedCard.effect === 'antidote') {
+      // 誰にでも使用可能（脱落済みは除く）
+      const p = players[id];
+      return p && !p.isEliminated;
+    }
     return getAttackTargets(selectedCard).includes(id);
   }
 
@@ -350,10 +377,20 @@ export default function BattlePage({ initData, onExit }) {
   }
 
   const currentPlayerId = gameState?.currentPlayerId;
+  const hasDoubleAttackCard = myHand.some(c => c.effect === 'double_attack');
+  const canUseDoubleAttack = isMyTurn && selectedCard && DOUBLE_ATTACK_ELIGIBLE.has(selectedCard.effect) && hasDoubleAttackCard;
 
   return (
     <div className="battle-layout">
       <BattleEffectLayer effects={effects} />
+      {/* ヘッダーバー */}
+      <div className="battle-header">
+        <span className="turn-counter">ターン {turnCount}</span>
+        {isMyTurn && <span className="your-turn-badge">▶ あなたのターン！</span>}
+        <button className="log-toggle-btn" onClick={() => setLogOpen(v => !v)}>
+          📋 ログ
+        </button>
+      </div>
       {/* プレイヤーエリア（全員表示） */}
       <div className="opponents-area">
         {playerOrder.map(id => {
@@ -403,7 +440,6 @@ export default function BattlePage({ initData, onExit }) {
                 {isCurrent         && <span className="badge badge-turn">ターン中</span>}
                 {p.isPoisoned      && <span className="badge badge-poison">☠毒</span>}
                 {p.isParalyzed     && <span className="badge badge-paralysis">⚡麻痺</span>}
-                {p.isShielded && id === myId && <span className="badge" style={{ background: '#1565c0', color: '#fff' }}>🛡防御中</span>}
                 {p.isEliminated    && <span className="badge" style={{ background: '#555', color: '#fff' }}>脱落</span>}
                 {mode === 'team'   && <span className={`badge ${p.team === 0 ? 'badge-team0' : 'badge-team1'}`}>チーム{p.team + 1}</span>}
               </div>
@@ -416,7 +452,6 @@ export default function BattlePage({ initData, onExit }) {
       <div className="hand-area panel">
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
           手札 ({myHand.length}枚)
-          {isMyTurn && <span style={{ color: 'var(--yellow)', fontWeight: 700, marginLeft: 8 }}>▶ あなたのターン！</span>}
         </div>
         <div className="hand-grid">
           {myHand.map(card => {
@@ -456,6 +491,16 @@ export default function BattlePage({ initData, onExit }) {
                   </div>
                 )}
               </div>
+              {canUseDoubleAttack && (
+                <label className="double-attack-toggle" title="二連撃カードを消費して2回攻撃">
+                  <input
+                    type="checkbox"
+                    checked={useDoubleAttack}
+                    onChange={e => setUseDoubleAttack(e.target.checked)}
+                  />
+                  ⚔️ 二連撃
+                </label>
+              )}
               <button className="btn btn-primary" disabled={!selectedCard || !selectedTarget} onClick={handleConfirm}>
                 使用
               </button>
@@ -475,9 +520,13 @@ export default function BattlePage({ initData, onExit }) {
         </div>
       </div>
 
-      {/* バトルログ */}
-      <div className="log-panel panel">
-        <h3>バトルログ</h3>
+      {/* バトルログ（スライドイン） */}
+      {logOpen && <div className="log-backdrop" onClick={() => setLogOpen(false)} />}
+      <div className={`log-panel panel${logOpen ? ' log-panel-open' : ''}`}>
+        <div className="log-panel-header">
+          <h3>バトルログ</h3>
+          <button className="log-close-btn" onClick={() => setLogOpen(false)}>✕</button>
+        </div>
         <div className="log-list" ref={logRef}>
           {battleLog.map((entry, i) => (
             <div key={i} className="log-entry">{entry}</div>
@@ -498,6 +547,21 @@ export default function BattlePage({ initData, onExit }) {
                 <div className="prompt-buttons">
                   <button className="btn btn-primary" onClick={() => handleReflect(true)}>反射する</button>
                   <button className="btn btn-ghost" onClick={() => handleReflect(false)}>受ける</button>
+                </div>
+                <div className="timer-bar"><div className="timer-fill" style={{ width: `${timer}%` }} /></div>
+                <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>20秒以内に選択（未選択→受ける）</p>
+              </>
+            )}
+
+            {prompt.type === 'defense' && (
+              <>
+                <h3>🛡️ 絶対防御できます！</h3>
+                <p>
+                  {prompt.attackerNickname} の「{EFFECT_MAP[prompt.effectType]?.label}」を防ぎますか？
+                </p>
+                <div className="prompt-buttons">
+                  <button className="btn btn-primary" onClick={() => handleDefense(true)}>防御する</button>
+                  <button className="btn btn-ghost" onClick={() => handleDefense(false)}>受ける</button>
                 </div>
                 <div className="timer-bar"><div className="timer-fill" style={{ width: `${timer}%` }} /></div>
                 <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 8 }}>20秒以内に選択（未選択→受ける）</p>

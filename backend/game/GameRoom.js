@@ -11,16 +11,21 @@ const {
 } = require('./GameLogic');
 
 const REFLECT_TIMEOUT_MS = 20000;
+const DEFENSE_TIMEOUT_MS = 20000;
 const HEAL_TARGET_TIMEOUT_MS = 15000;
+
+// 絶対防御で防げる攻撃種別
+const DEFENSIBLE_EFFECTS = new Set(['explosion', 'invincible', 'poison', 'paralysis']);
 
 const CARD_NAMES = {
   explosion: '攻撃', poison: '毒', paralysis: '麻痺', heal: '回復',
   explosion_reflect: '攻撃反射', poison_reflect: '毒反射', paralysis_reflect: '麻痺反射',
-  invincible: '無敵技', absolute_defense: '絶対防御',
+  invincible: '無敵技', absolute_defense: '絶対防御', antidote: '解毒剤',
+  double_attack: '二連撃',
 };
 
 // プレイヤーがアクションで直接使えるカード
-const ACTIVE_EFFECTS = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible', 'absolute_defense']);
+const ACTIVE_EFFECTS = new Set(['explosion', 'poison', 'paralysis', 'heal', 'invincible', 'antidote']);
 
 class GameRoom {
   constructor(roomCode, hostId, hostNickname) {
@@ -31,6 +36,7 @@ class GameRoom {
     this.players = new Map(); // socketId → playerState
     this.joinOrder = [];      // 入室順のsocketId配列
     this.currentTurnIndex = 0;
+    this.turnCount = 0;
     this.phase = 'waiting';
     this.pendingAction = null;
     this.io = null;
@@ -51,9 +57,6 @@ class GameRoom {
       isPoisoned: false,
       isParalyzed: false,
       isEliminated: false,
-      isShielded: false,
-      shieldCardImage: null,
-      shieldCardName: null,
       team: -1,
       lobbyTeam: -1,
     });
@@ -126,9 +129,6 @@ class GameRoom {
       p.isPoisoned = false;
       p.isParalyzed = false;
       p.isEliminated = false;
-      p.isShielded = false;
-      p.shieldCardImage = null;
-      p.shieldCardName = null;
       p.team = this.mode === 'team' ? (p.lobbyTeam !== -1 ? p.lobbyTeam : idx % 2) : -1;
 
       const rawDeck = playerDecks.get(id) || [];
@@ -210,7 +210,7 @@ class GameRoom {
 
   // ─── カード使用 ────────────────────────────────────────────
 
-  handlePlayCard(socketId, cardInstanceId, targetId) {
+  handlePlayCard(socketId, cardInstanceId, targetId, useDoubleAttack = false) {
     if (this.phase !== 'action') {
       console.log(`[handlePlayCard] rejected: phase=${this.phase} (not action)`);
       return;
@@ -220,57 +220,63 @@ class GameRoom {
       return;
     }
 
+    // カードレベルの拒否時はクライアントのターンを再有効化するヘルパー
+    const rejectPlay = (msg) => {
+      console.log(`[handlePlayCard] rejected: ${msg}`);
+      this._emitTo(socketId, 'your_turn', {});
+    };
+
     const player = this.players.get(socketId);
-    if (!player) return;
+    if (!player) return rejectPlay('no player');
 
     const cardIdx = player.hand.findIndex(c => c.instanceId === cardInstanceId);
-    if (cardIdx === -1) {
-      console.log(`[handlePlayCard] rejected: card not in hand`);
-      return;
-    }
+    if (cardIdx === -1) return rejectPlay('card not in hand');
     const card = player.hand[cardIdx];
 
     // アクション可能なカードのみ使用可
-    if (!ACTIVE_EFFECTS.has(card.effect)) {
-      console.log(`[handlePlayCard] rejected: effect not active ${card.effect}`);
-      return;
-    }
+    if (!ACTIVE_EFFECTS.has(card.effect)) return rejectPlay(`effect not active ${card.effect}`);
 
     // heal / absolute_defense は強制自己対象、それ以外はtargetId使用
     const isSelfTarget = card.effect === 'heal' || card.effect === 'absolute_defense';
+    // antidote は自分も対象にできる（強制ではない）
+    const canTargetSelf = card.effect === 'antidote';
     const effectiveTargetId = isSelfTarget
       ? socketId
       : (targetId === undefined || targetId === null || targetId === '') ? socketId : targetId;
 
     const target = this.players.get(effectiveTargetId);
     if (!target || (!isSelfTarget && target.isEliminated)) {
-      console.log(`[handlePlayCard] rejected: target=${!!target} elim=${target?.isEliminated} targetId=${effectiveTargetId}`);
-      return;
+      return rejectPlay(`target=${!!target} elim=${target?.isEliminated} targetId=${effectiveTargetId}`);
     }
 
-    // 攻撃系は自分をターゲットにできない
-    if (!isSelfTarget && socketId === effectiveTargetId) {
-      console.log(`[handlePlayCard] rejected: non-self card targeting self`);
-      return;
-    }
+    // 攻撃系は自分をターゲットにできない（antidoteは除く）
+    if (!isSelfTarget && !canTargetSelf && socketId === effectiveTargetId) return rejectPlay('non-self card targeting self');
 
     // チーム戦でhealは自チームのみ
     if (card.effect === 'heal' && this.mode === 'team') {
-      if (target.team !== player.team) {
-        console.log(`[handlePlayCard] rejected: heal wrong team`);
-        return;
-      }
+      if (target.team !== player.team) return rejectPlay('heal wrong team');
     }
 
     console.log(`[handlePlayCard] OK effect=${card.effect} mode=${this.mode} target=${effectiveTargetId}`);
 
     player.hand.splice(cardIdx, 1);
+
+    // 二連撃カードの消費（爆発・無敵技のみ）
+    const DOUBLE_ATTACK_ELIGIBLE = new Set(['explosion']);
+    const doubleAttackIdx = useDoubleAttack && DOUBLE_ATTACK_ELIGIBLE.has(card.effect)
+      ? player.hand.findIndex(c => c.effect === 'double_attack')
+      : -1;
+    if (doubleAttackIdx !== -1) {
+      player.hand.splice(doubleAttackIdx, 1);
+    }
+    const isDoubleAttack = doubleAttackIdx !== -1;
+
     this._emitTo(socketId, 'hand_update', { hand: player.hand });
     this.phase = 'processing';
 
     this._emitAll('game_update', {
       state: this.getPublicState(),
-      log: `${player.nickname} が「${this._cardLabel(card)}」を使用 → ${target.nickname}`,
+      log: `${player.nickname} が「${this._cardLabel(card)}」を使用${isDoubleAttack ? '（二連撃！）' : ''} → ${target.nickname}`,
     });
 
     // エフェクト表示用データを事前計算
@@ -286,6 +292,7 @@ class GameRoom {
     } else if (card.effect === 'heal') {
       preCalc.amount = randomHeal();
     }
+    if (isDoubleAttack) preCalc.doubleAttack = true;
 
     // カード使用時に即エフェクト表示（反射待ちの場合も含む）
     const effectAnnouncements = {
@@ -294,7 +301,7 @@ class GameRoom {
       poison:           `${player.nickname}が${target.nickname}に毒！`,
       paralysis:        `${player.nickname}が${target.nickname}に麻痺！`,
       heal:             `${player.nickname}がHPを回復！`,
-      absolute_defense: `${player.nickname}が絶対防御を構えた！`,
+      antidote:         `${player.nickname}が解毒剤を使用！`,
     };
     this._emitAll('battle_effect', {
       type: card.effect,
@@ -306,7 +313,7 @@ class GameRoom {
       amount: preCalc.amount,
     });
 
-    // 反射チェック（爆発・毒・麻痺のみ）
+    // 反射チェック（爆発・毒・麻痺）
     const reflectMap = { explosion: 'explosion_reflect', poison: 'poison_reflect', paralysis: 'paralysis_reflect' };
     const reflectEffect = reflectMap[card.effect];
     const hasReflectCard = target.hand.some(c => c.effect === reflectEffect);
@@ -314,6 +321,10 @@ class GameRoom {
     if (reflectEffect && !canReflect) {
       console.log(`[handlePlayCard] canReflect=false: effect=${card.effect} reflectCard=${hasReflectCard} targetElim=${target.isEliminated}`);
     }
+
+    // 絶対防御チェック（反射がない場合のみ）
+    const hasDefenseCard = !canReflect && DEFENSIBLE_EFFECTS.has(card.effect)
+      && !target.isEliminated && target.hand.some(c => c.effect === 'absolute_defense');
 
     if (canReflect) {
       this.phase = 'reflect_choice';
@@ -335,6 +346,27 @@ class GameRoom {
             this._resolveReflect(false, pa.card, pa.attackerId, pa.targetId, pa.preCalc);
           }
         }, REFLECT_TIMEOUT_MS),
+      };
+    } else if (hasDefenseCard) {
+      this.phase = 'defense_choice';
+      this._emitTo(effectiveTargetId, 'defense_prompt', {
+        effectType: card.effect,
+        attackerId: socketId,
+        attackerNickname: player.nickname,
+      });
+      this.pendingAction = {
+        type: 'defense_choice',
+        card,
+        attackerId: socketId,
+        targetId: effectiveTargetId,
+        preCalc,
+        timeout: setTimeout(() => {
+          if (this.pendingAction?.type === 'defense_choice') {
+            const pa = this.pendingAction;
+            this.pendingAction = null;
+            this._resolveDefense(false, pa.card, pa.attackerId, pa.targetId, pa.preCalc);
+          }
+        }, DEFENSE_TIMEOUT_MS),
       };
     } else if (card.effect === 'heal' && this.mode === 'team') {
       this._promptHealTarget(socketId, card, preCalc);
@@ -375,18 +407,35 @@ class GameRoom {
     if (doReflect) {
       const reflectEffectMap = { explosion: 'explosion_reflect', poison: 'poison_reflect', paralysis: 'paralysis_reflect' };
       const reflectEffectName = reflectEffectMap[card.effect];
+      // 反射確率（攻撃反射100%、毒・麻痺反射50%）
+      const REFLECT_RATES = { explosion_reflect: 1.0, poison_reflect: 0.5, paralysis_reflect: 0.5 };
+      const reflectRate = REFLECT_RATES[reflectEffectName] ?? 1.0;
+      const reflectSucceeds = Math.random() < reflectRate;
+
       const idx = target.hand.findIndex(c => c.effect === reflectEffectName);
       let defCard = null;
       if (idx !== -1) {
         defCard = target.hand[idx];
-        target.hand.splice(idx, 1);
+        target.hand.splice(idx, 1); // 成功・失敗問わずカードを消費
       } else {
         console.warn(`[_resolveReflect] reflect card not found in hand! effect=${reflectEffectName}`);
       }
       this._emitTo(targetId, 'hand_update', { hand: target.hand });
 
-      // 攻撃エフェクト（2800ms）の後：反射カードを表示
+      // 攻撃エフェクト（2800ms）の後：反射結果を表示
       setTimeout(() => {
+        if (!reflectSucceeds) {
+          // 反射失敗
+          this._emitAll('game_update', {
+            state: this.getPublicState(),
+            log: `${target.nickname} の反射が失敗した！（確率${Math.round(reflectRate * 100)}%）`,
+          });
+          setTimeout(() => {
+            this._applyEffect(card, attackerId, targetId, preCalc);
+          }, 1000);
+          return;
+        }
+        // 反射成功
         this._emitAll('game_update', {
           state: this.getPublicState(),
           log: `${target.nickname} が反射！効果が ${attacker.nickname} に返った！`,
@@ -402,6 +451,53 @@ class GameRoom {
         // 反射カード表示（2800ms）の後：効果を適用（攻撃者が対象になる）
         setTimeout(() => {
           this._applyEffect(card, targetId, attackerId, preCalc);
+        }, 2800);
+      }, 2800);
+    } else {
+      this._applyEffect(card, attackerId, targetId, preCalc);
+    }
+  }
+
+  handleDefenseResponse(socketId, doDefend) {
+    console.log(`[handleDefenseResponse] socketId=${socketId} doDefend=${doDefend} pendingType=${this.pendingAction?.type}`);
+    if (this.pendingAction?.type !== 'defense_choice') return;
+    if (this.pendingAction.targetId !== socketId) return;
+    clearTimeout(this.pendingAction.timeout);
+    const { card, attackerId, targetId, preCalc } = this.pendingAction;
+    this.pendingAction = null;
+    this._resolveDefense(doDefend, card, attackerId, targetId, preCalc);
+  }
+
+  _resolveDefense(doDefend, card, attackerId, targetId, preCalc = {}) {
+    const target = this.players.get(targetId);
+    const attacker = this.players.get(attackerId);
+    console.log(`[_resolveDefense] doDefend=${doDefend} card=${card.effect} attacker=${attackerId} target=${targetId}`);
+
+    if (doDefend) {
+      const idx = target.hand.findIndex(c => c.effect === 'absolute_defense');
+      let defCard = null;
+      if (idx !== -1) {
+        defCard = target.hand[idx];
+        target.hand.splice(idx, 1);
+      }
+      this._emitTo(targetId, 'hand_update', { hand: target.hand });
+
+      this._emitAll('game_update', {
+        state: this.getPublicState(),
+        log: `${target.nickname} が絶対防御！${attacker.nickname} の攻撃を完全に防いだ！`,
+      });
+
+      // 攻撃エフェクト（2800ms）後に防御エフェクト表示、さらに2800ms後にターン進行
+      setTimeout(() => {
+        this._emitAll('battle_effect', {
+          type: 'absolute_defense',
+          targetId,
+          card: defCard ? { imageUrl: defCard.imageUrl, name: defCard.name || null } : null,
+          announcement: `${target.nickname}が絶対防御！`,
+        });
+        setTimeout(() => {
+          this._checkEliminations();
+          if (!this._checkGameOver()) this._advanceTurn();
         }, 2800);
       }, 2800);
     } else {
@@ -461,33 +557,56 @@ class GameRoom {
       return;
     }
 
-    let defenseTookOver = false;
+    let skipFinalFlow = false;
 
     switch (card.effect) {
       case 'explosion': {
-        if (this._tryAbsoluteDefense(targetId)) { defenseTookOver = true; break; }
         const dmg = preCalc.damage ?? BASE_DAMAGE.explosion;
         target.hp -= dmg;
         this._emitAll('game_update', {
           state: this.getPublicState(),
-          log: `${target.nickname} に攻撃 ${dmg} ダメージ！ (HP: ${Math.max(0, target.hp)})`,
+          log: `${target.nickname} に攻撃 ${dmg} ダメージ！${preCalc.doubleAttack ? '（1撃目）' : ''} (HP: ${Math.max(0, target.hp)})`,
         });
+        if (preCalc.doubleAttack) {
+          skipFinalFlow = true;
+          this._checkEliminations();
+          if (this._checkGameOver()) break;
+          if (target.isEliminated) { this._advanceTurn(); break; }
+          setTimeout(() => {
+            this._emitAll('battle_effect', { type: 'explosion', targetId, card: { imageUrl: card.imageUrl, name: card.name || null }, announcement: '2撃目！', damage: dmg });
+            target.hp -= dmg;
+            this._emitAll('game_update', { state: this.getPublicState(), log: `${target.nickname} に2撃目 ${dmg} ダメージ！ (HP: ${Math.max(0, target.hp)})` });
+            this._checkEliminations();
+            if (!this._checkGameOver()) this._advanceTurn();
+          }, 2800);
+        }
         break;
       }
 
       case 'invincible': {
-        if (this._tryAbsoluteDefense(targetId)) { defenseTookOver = true; break; }
         const dmg = preCalc.damage ?? BASE_DAMAGE.invincible;
         target.hp -= dmg;
         this._emitAll('game_update', {
           state: this.getPublicState(),
-          log: `無敵技！${target.nickname} に ${dmg} の固定ダメージ！ (HP: ${Math.max(0, target.hp)})`,
+          log: `無敵技！${target.nickname} に ${dmg} ダメージ！${preCalc.doubleAttack ? '（1撃目）' : ''} (HP: ${Math.max(0, target.hp)})`,
         });
+        if (preCalc.doubleAttack) {
+          skipFinalFlow = true;
+          this._checkEliminations();
+          if (this._checkGameOver()) break;
+          if (target.isEliminated) { this._advanceTurn(); break; }
+          setTimeout(() => {
+            this._emitAll('battle_effect', { type: 'invincible', targetId, card: { imageUrl: card.imageUrl, name: card.name || null }, announcement: '2撃目！', damage: dmg });
+            target.hp -= dmg;
+            this._emitAll('game_update', { state: this.getPublicState(), log: `無敵技2撃目！${target.nickname} に ${dmg} ダメージ！ (HP: ${Math.max(0, target.hp)})` });
+            this._checkEliminations();
+            if (!this._checkGameOver()) this._advanceTurn();
+          }, 2800);
+        }
         break;
       }
 
       case 'poison': {
-        if (this._tryAbsoluteDefense(targetId)) { defenseTookOver = true; break; }
         const hit = preCalc.hit ?? hitRoll(POISON_HIT_RATE);
         if (hit) {
           target.isPoisoned = true;
@@ -502,7 +621,6 @@ class GameRoom {
       }
 
       case 'paralysis': {
-        if (this._tryAbsoluteDefense(targetId)) { defenseTookOver = true; break; }
         const hit = preCalc.hit ?? hitRoll(PARALYSIS_HIT_RATE);
         if (hit) {
           target.isParalyzed = true;
@@ -526,55 +644,28 @@ class GameRoom {
         break;
       }
 
-      case 'absolute_defense': {
-        // 自分のターンに使用 → シールド状態をセット
-        source.isShielded = true;
-        source.shieldCardImage = card.imageUrl || null;
-        source.shieldCardName  = card.name || null;
+      case 'antidote': {
+        const wasPoisoned = target.isPoisoned;
+        target.isPoisoned = false;
         this._emitAll('game_update', {
           state: this.getPublicState(),
-          log: `${source.nickname} が絶対防御を構えた！次の攻撃を1回防ぐ`,
+          log: wasPoisoned
+            ? `${source.nickname} が解毒剤を使用！${target.nickname} の毒が解除された！`
+            : `${source.nickname} が解毒剤を使用！（${target.nickname} は毒状態ではなかった）`,
         });
         break;
       }
+
     }
 
-    if (defenseTookOver) return; // _tryAbsoluteDefense がタイマーで _advanceTurn を呼ぶ
-    this._checkEliminations();
-    if (this._checkGameOver()) return;
-    this._advanceTurn();
+    if (!skipFinalFlow) {
+      this._checkEliminations();
+      if (this._checkGameOver()) return;
+      this._advanceTurn();
+    }
   }
 
   // ─── 防御チェック ─────────────────────────────────────────
-
-  _tryAbsoluteDefense(targetId) {
-    const target = this.players.get(targetId);
-    if (!target.isShielded) return false;
-    // シールド解除
-    target.isShielded = false;
-    const shieldImg  = target.shieldCardImage;
-    const shieldName = target.shieldCardName;
-    target.shieldCardImage = null;
-    target.shieldCardName  = null;
-    this._emitAll('game_update', {
-      state: this.getPublicState(),
-      log: `${target.nickname} の絶対防御が発動！攻撃を完全に防いだ！`,
-    });
-    // 攻撃エフェクト（2800ms）後に防御エフェクト表示、さらに2800ms後にターン進行
-    setTimeout(() => {
-      this._emitAll('battle_effect', {
-        type: 'absolute_defense',
-        targetId,
-        card: shieldImg ? { imageUrl: shieldImg, name: shieldName } : null,
-        announcement: `${target.nickname}が絶対防御！`,
-      });
-      setTimeout(() => {
-        this._checkEliminations();
-        if (!this._checkGameOver()) this._advanceTurn();
-      }, 2800);
-    }, 2800);
-    return true;
-  }
 
   // ─── 脱落・勝敗 ───────────────────────────────────────────
 
@@ -596,19 +687,23 @@ class GameRoom {
     });
   }
 
-  _checkGameOver() {
+  _checkGameOver(gameOverDelay = 4500) {
     const active = this._getActivePlayers();
 
     if (this.mode === '1v1' || this.mode === 'battle_royale') {
       if (active.length <= 1) {
-        const winner = active[0] ? this.players.get(active[0]) : null;
-        this._emitAll('game_over', {
-          winnerId: active[0] || null,
-          winnerNickname: winner?.nickname || null,
-          log: winner ? `🏆 ${winner.nickname} の勝利！` : '引き分け！',
-        });
         this.status = 'finished';
-        this._scheduleRoomCleanup();
+        const winner = active[0] ? this.players.get(active[0]) : null;
+        const winnerId = active[0] || null;
+        const winnerNickname = winner?.nickname || null;
+        setTimeout(() => {
+          this._emitAll('game_over', {
+            winnerId,
+            winnerNickname,
+            log: winner ? `🏆 ${winnerNickname} の勝利！` : '引き分け！',
+          });
+          this._scheduleRoomCleanup();
+        }, gameOverDelay);
         return true;
       }
     } else if (this.mode === 'team') {
@@ -616,12 +711,14 @@ class GameRoom {
         const teamActive = active.filter(id => this.players.get(id)?.team === team);
         if (teamActive.length === 0) {
           const winTeam = 1 - team;
-          this._emitAll('game_over', {
-            winnerTeam: winTeam,
-            log: `🏆 チーム${winTeam + 1} の勝利！`,
-          });
           this.status = 'finished';
-          this._scheduleRoomCleanup();
+          setTimeout(() => {
+            this._emitAll('game_over', {
+              winnerTeam: winTeam,
+              log: `🏆 チーム${winTeam + 1} の勝利！`,
+            });
+            this._scheduleRoomCleanup();
+          }, gameOverDelay);
           return true;
         }
       }
@@ -660,6 +757,7 @@ class GameRoom {
     this.rematchVotes = new Set();
     this.status = 'playing';
     this.currentTurnIndex = 0;
+    this.turnCount = 0;
     this.phase = 'idle';
     this.pendingAction = null;
 
@@ -670,9 +768,6 @@ class GameRoom {
       p.isPoisoned = false;
       p.isParalyzed = false;
       p.isEliminated = false;
-      p.isShielded = false;
-      p.shieldCardImage = null;
-      p.shieldCardName = null;
       p.team = this.mode === 'team' ? (p.lobbyTeam !== -1 ? p.lobbyTeam : idx % 2) : -1;
       p.deck = this._shuffle([...p.deckTemplate]);
       p.hand = [];
@@ -696,6 +791,7 @@ class GameRoom {
       if (p && !p.isEliminated) { this.currentTurnIndex = next; break; }
       next = (next + 1) % n;
     }
+    this.turnCount++;
     this.phase = 'idle';
     setTimeout(() => this._startTurn(), 600);
   }
@@ -732,7 +828,6 @@ class GameRoom {
           isPoisoned: p.isPoisoned,
           isParalyzed: p.isParalyzed,
           isEliminated: p.isEliminated,
-          isShielded: p.isShielded,
           team: p.team,
         };
       }
@@ -744,6 +839,7 @@ class GameRoom {
       playerOrder: this.joinOrder,
       currentPlayerId: this._getCurrentPlayerId(),
       phase: this.phase,
+      turnCount: this.turnCount,
     };
   }
 

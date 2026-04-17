@@ -1,11 +1,28 @@
 import { useState, useRef } from 'react';
 import { EFFECTS, EFFECT_MAP, CATEGORY_COLORS } from '../utils/gameConstants';
-import { loadDeck, saveDeck, addCard, removeCard, canAddCard } from '../utils/deckStorage';
+import {
+  loadAllDecks, getActiveDeck, setActiveDeck,
+  createDeck, renameDeck, deleteDeck, saveDeckCards,
+  addCard, removeCard, canAddCard,
+} from '../utils/deckStorage';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export default function DeckBuilderPage({ onBack }) {
-  const [deck, setDeck] = useState(loadDeck);
+  const [decks, setDecks] = useState(() => {
+    const all = loadAllDecks();
+    if (all.length === 0) {
+      const d = createDeck('デッキ1');
+      return [d];
+    }
+    return all;
+  });
+  const activeDeck = getActiveDeck();
+  const [selectedDeckId, setSelectedDeckId] = useState(activeDeck?.id || decks[0]?.id || null);
+
+  const currentDeck = decks.find(d => d.id === selectedDeckId) || decks[0] || null;
+  const cards = currentDeck?.cards || [];
+
   const [cardName, setCardName] = useState('');
   const [imageUrl, setImageUrl] = useState('');
   const [imagePreview, setImagePreview] = useState('');
@@ -13,7 +30,62 @@ export default function DeckBuilderPage({ onBack }) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [editingId, setEditingId] = useState(null);
+
+  const [renamingDeckId, setRenamingDeckId] = useState(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [newDeckName, setNewDeckName] = useState('');
+  const [showNewDeck, setShowNewDeck] = useState(false);
+
   const fileRef = useRef();
+
+  function refreshDecks() {
+    setDecks(loadAllDecks());
+  }
+
+  function handleSelectDeck(id) {
+    setSelectedDeckId(id);
+    setActiveDeck(id);
+    resetForm();
+  }
+
+  function handleCreateDeck() {
+    const name = newDeckName.trim() || `デッキ${decks.length + 1}`;
+    const deck = createDeck(name);
+    refreshDecks();
+    setSelectedDeckId(deck.id);
+    setActiveDeck(deck.id);
+    setNewDeckName('');
+    setShowNewDeck(false);
+    resetForm();
+  }
+
+  function handleStartRename(deck) {
+    setRenamingDeckId(deck.id);
+    setRenameValue(deck.name);
+  }
+
+  function handleFinishRename(id) {
+    if (renameValue.trim()) {
+      renameDeck(id, renameValue.trim());
+      refreshDecks();
+    }
+    setRenamingDeckId(null);
+  }
+
+  function handleDeleteDeck(id) {
+    if (decks.length === 1) {
+      // 最後の1枚は消せない。中身だけ消す
+      saveDeckCards(id, []);
+      refreshDecks();
+      return;
+    }
+    const store = deleteDeck(id);
+    const remaining = store.decks;
+    setDecks(remaining);
+    const next = remaining[0]?.id || null;
+    setSelectedDeckId(next);
+    resetForm();
+  }
 
   async function handleFileChange(e) {
     const file = e.target.files[0];
@@ -45,7 +117,7 @@ export default function DeckBuilderPage({ onBack }) {
     setSelectedEffect(null);
     setError('');
     setEditingId(null);
-    fileRef.current.value = '';
+    if (fileRef.current) fileRef.current.value = '';
   }
 
   function handleEdit(card) {
@@ -59,41 +131,45 @@ export default function DeckBuilderPage({ onBack }) {
   }
 
   function handleAddCard() {
-    if (!imageUrl)        { setError('画像をアップロードしてください'); return; }
-    if (!selectedEffect)  { setError('効果を選んでください'); return; }
+    if (!imageUrl)       { setError('画像をアップロードしてください'); return; }
+    if (!selectedEffect) { setError('効果を選んでください'); return; }
+    if (!currentDeck)    return;
 
     if (editingId) {
-      // 編集モード: 既存カードを更新
-      const newDeck = deck.map(c =>
+      const newCards = cards.map(c =>
         c.id === editingId
           ? { ...c, name: cardName.trim() || null, imageUrl, effect: selectedEffect }
           : c
       );
-      setDeck(newDeck);
-      saveDeck(newDeck);
+      saveDeckCards(currentDeck.id, newCards);
+      refreshDecks();
       resetForm();
       return;
     }
 
-    if (!canAddCard(deck, selectedEffect)) {
-      setError(`「${EFFECT_MAP[selectedEffect].label}」はデッキに1枚まで`);
+    if (!canAddCard(cards, selectedEffect)) {
+      const lim = EFFECT_MAP[selectedEffect]?.deckLimit;
+      setError(lim
+        ? `「${EFFECT_MAP[selectedEffect].label}」はデッキに${lim}枚まで`
+        : 'デッキが満杯です（15枚）');
       return;
     }
-    const newDeck = addCard(deck, {
+    const newCards = addCard(cards, {
       name: cardName.trim() || null,
       imageUrl,
       effect: selectedEffect,
     });
-    setDeck(newDeck);
-    saveDeck(newDeck);
+    saveDeckCards(currentDeck.id, newCards);
+    refreshDecks();
     resetForm();
   }
 
   function handleRemove(cardId) {
     if (editingId === cardId) resetForm();
-    const newDeck = removeCard(deck, cardId);
-    setDeck(newDeck);
-    saveDeck(newDeck);
+    if (!currentDeck) return;
+    const newCards = removeCard(cards, cardId);
+    saveDeckCards(currentDeck.id, newCards);
+    refreshDecks();
   }
 
   const effectByCategory = EFFECTS.reduce((acc, e) => {
@@ -102,14 +178,62 @@ export default function DeckBuilderPage({ onBack }) {
   }, {});
   const CATEGORY_LABELS = { attack: '攻撃系', heal: '回復系', null: '無効系', reflect: '反射系', special: '特殊系' };
 
+  const activeId = getActiveDeck()?.id;
+
   return (
     <div className="page">
       <div className="page-header">
         <button className="btn btn-ghost" onClick={onBack}>← 戻る</button>
         <h2>🃏 デッキビルダー</h2>
-        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--muted)' }}>
-          {deck.length} 枚（推奨 10〜20）
-        </span>
+      </div>
+
+      {/* デッキ選択バー */}
+      <div className="deck-tab-bar">
+        {decks.map(deck => (
+          <div
+            key={deck.id}
+            className={`deck-tab${deck.id === selectedDeckId ? ' deck-tab-active' : ''}`}
+          >
+            {renamingDeckId === deck.id ? (
+              <input
+                className="deck-tab-rename"
+                value={renameValue}
+                autoFocus
+                onChange={e => setRenameValue(e.target.value)}
+                onBlur={() => handleFinishRename(deck.id)}
+                onKeyDown={e => { if (e.key === 'Enter') handleFinishRename(deck.id); if (e.key === 'Escape') setRenamingDeckId(null); }}
+              />
+            ) : (
+              <span className="deck-tab-name" onClick={() => handleSelectDeck(deck.id)}>
+                {deck.id === activeId && <span className="deck-active-dot" title="対戦で使用中">●</span>}
+                {deck.name}
+              </span>
+            )}
+            {deck.id === selectedDeckId && renamingDeckId !== deck.id && (
+              <span className="deck-tab-actions">
+                <button className="deck-tab-btn" onClick={() => handleStartRename(deck)} title="名前を変更">✏</button>
+                <button className="deck-tab-btn deck-tab-btn-del" onClick={() => handleDeleteDeck(deck.id)} title="削除">✕</button>
+              </span>
+            )}
+          </div>
+        ))}
+
+        {showNewDeck ? (
+          <div className="deck-tab deck-tab-new-form">
+            <input
+              className="deck-tab-rename"
+              placeholder={`デッキ${decks.length + 1}`}
+              value={newDeckName}
+              autoFocus
+              onChange={e => setNewDeckName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleCreateDeck(); if (e.key === 'Escape') { setShowNewDeck(false); setNewDeckName(''); } }}
+            />
+            <button className="deck-tab-btn" onClick={handleCreateDeck}>✓</button>
+            <button className="deck-tab-btn deck-tab-btn-del" onClick={() => { setShowNewDeck(false); setNewDeckName(''); }}>✕</button>
+          </div>
+        ) : (
+          <button className="deck-tab-add" onClick={() => setShowNewDeck(true)}>＋</button>
+        )}
       </div>
 
       <div className="deck-builder">
@@ -145,7 +269,6 @@ export default function DeckBuilderPage({ onBack }) {
           <div>
             <label>効果を選ぶ</label>
             {selectedEffect ? (
-              // 選択済み: 選んだ効果だけ表示。タップで選択解除
               <div>
                 <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 6 }}>選択中（もう一度タップで変更）</div>
                 <button
@@ -162,31 +285,32 @@ export default function DeckBuilderPage({ onBack }) {
                 </button>
               </div>
             ) : (
-              // 未選択: 追加可能な効果のみ表示
-              Object.entries(effectByCategory).map(([cat, effects]) => {
-                const available = effects.filter(e => canAddCard(deck, e.id));
-                if (available.length === 0) return null;
-                return (
-                  <div key={cat} style={{ marginBottom: 10 }}>
-                    <div style={{ fontSize: 11, color: CATEGORY_COLORS[cat], marginBottom: 4, fontWeight: 700 }}>
-                      {CATEGORY_LABELS[cat]}
-                    </div>
-                    <div className="effect-grid">
-                      {available.map(e => (
+              Object.entries(effectByCategory).map(([cat, effects]) => (
+                <div key={cat} style={{ marginBottom: 10 }}>
+                  <div style={{ fontSize: 11, color: CATEGORY_COLORS[cat], marginBottom: 4, fontWeight: 700 }}>
+                    {CATEGORY_LABELS[cat]}
+                  </div>
+                  <div className="effect-grid">
+                    {effects.map(e => {
+                      const addable = canAddCard(cards, e.id);
+                      return (
                         <button
                           key={e.id}
                           className="effect-btn"
-                          onClick={() => setSelectedEffect(e.id)}
-                          title={e.description}
+                          onClick={() => addable && setSelectedEffect(e.id)}
+                          title={addable ? e.description : `上限に達しました（${e.deckLimit}枚まで）`}
+                          style={addable ? {} : { opacity: 0.35, cursor: 'not-allowed' }}
+                          disabled={!addable}
                         >
                           <span style={{ color: CATEGORY_COLORS[e.category] }}>{e.label}</span>
-                          {e.deckLimit && <span style={{ fontSize: 9, color: 'var(--muted)', display: 'block' }}>各1枚まで</span>}
+                          {e.deckLimit && <span style={{ fontSize: 9, color: 'var(--muted)', display: 'block' }}>各{e.deckLimit}枚まで</span>}
+                          {!addable && <span style={{ fontSize: 9, color: '#e74c3c', display: 'block' }}>上限</span>}
                         </button>
-                      ))}
-                    </div>
+                      );
+                    })}
                   </div>
-                );
-              })
+                </div>
+              ))
             )}
           </div>
 
@@ -204,11 +328,11 @@ export default function DeckBuilderPage({ onBack }) {
 
         {/* 右: デッキ一覧 */}
         <div className="panel">
-          <h3 style={{ marginBottom: 12 }}>デッキ（{deck.length}枚）</h3>
-          {deck.length === 0
+          <h3 style={{ marginBottom: 12 }}>{currentDeck?.name || 'デッキ'}（{cards.length}枚）</h3>
+          {cards.length === 0
             ? <p style={{ color: 'var(--muted)', fontSize: 13 }}>まだカードがありません</p>
             : <div className="deck-list">
-                {deck.map(card => (
+                {cards.map(card => (
                   <div key={card.id} className="deck-card-item">
                     <img src={card.imageUrl} alt="" className="deck-card-img" />
                     <div style={{ flex: 1 }}>

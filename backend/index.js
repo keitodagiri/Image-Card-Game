@@ -67,13 +67,20 @@ io.on('connection', (socket) => {
       socket.emit('room_error', { message: '2人以上必要です' });
       return;
     }
-    // 全プレイヤーのデッキ枚数チェック（最低5枚）
+    // 全プレイヤーのデッキ枚数チェック（5〜15枚）
     const MIN_DECK = 5;
+    const MAX_DECK = 15;
     for (const id of room.joinOrder) {
       const ps = io.sockets.sockets.get(id);
-      if (!ps?.deck || ps.deck.length < MIN_DECK) {
-        const p = room.players.get(id);
-        socket.emit('room_error', { message: `${p?.nickname || 'プレイヤー'} のデッキが${MIN_DECK}枚未満です` });
+      const deckLen = ps?.deck?.length ?? 0;
+      const p = room.players.get(id);
+      const name = p?.nickname || 'プレイヤー';
+      if (deckLen < MIN_DECK) {
+        socket.emit('room_error', { message: `${name} のデッキが${MIN_DECK}枚未満です` });
+        return;
+      }
+      if (deckLen > MAX_DECK) {
+        socket.emit('room_error', { message: `${name} のデッキが${MAX_DECK}枚を超えています` });
         return;
       }
     }
@@ -85,9 +92,9 @@ io.on('connection', (socket) => {
     room.startGame(io, playerDecks);
   });
 
-  socket.on('play_card', ({ cardInstanceId, targetId }) => {
+  socket.on('play_card', ({ cardInstanceId, targetId, useDoubleAttack }) => {
     const room = roomManager.getRoomBySocketId(socket.id);
-    if (room) room.handlePlayCard(socket.id, cardInstanceId, targetId);
+    if (room) room.handlePlayCard(socket.id, cardInstanceId, targetId, useDoubleAttack);
   });
 
   socket.on('pass_turn', () => {
@@ -98,6 +105,11 @@ io.on('connection', (socket) => {
   socket.on('reflect_response', ({ doReflect }) => {
     const room = roomManager.getRoomBySocketId(socket.id);
     if (room) room.handleReflectResponse(socket.id, doReflect);
+  });
+
+  socket.on('defense_response', ({ doDefend }) => {
+    const room = roomManager.getRoomBySocketId(socket.id);
+    if (room) room.handleDefenseResponse(socket.id, doDefend);
   });
 
   socket.on('heal_target_select', ({ targetId }) => {

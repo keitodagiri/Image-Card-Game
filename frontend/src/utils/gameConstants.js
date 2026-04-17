@@ -3,11 +3,13 @@ export const EFFECTS = [
   { id: 'poison',            label: '毒',       category: 'attack',  deckLimit: null, description: '70%で命中。毎ターン5〜12のランダムダメージ（永続）' },
   { id: 'paralysis',         label: '麻痺',     category: 'attack',  deckLimit: null, description: '60%で1ターン行動不能にする' },
   { id: 'heal',              label: '回復',     category: 'heal',    deckLimit: 3,    description: 'ランダム量でHP回復（上限100）。デッキに3枚まで' },
-  { id: 'explosion_reflect', label: '攻撃反射', category: 'reflect', deckLimit: 1,    description: '攻撃を受けた時、反射するか選択できる。デッキに1枚まで' },
-  { id: 'poison_reflect',    label: '毒反射',   category: 'reflect', deckLimit: 1,    description: '毒を受けた時、反射するか選択できる。デッキに1枚まで' },
-  { id: 'paralysis_reflect', label: '麻痺反射', category: 'reflect', deckLimit: 1,    description: '麻痺を受けた時、反射するか選択できる。デッキに1枚まで' },
+  { id: 'antidote',          label: '解毒剤',   category: 'heal',    deckLimit: 1,    description: '対象の毒を解除する。誰にでも使用可能。デッキに1枚まで' },
+  { id: 'explosion_reflect', label: '攻撃反射', category: 'reflect', deckLimit: 1,    description: '攻撃を受けた時、100%の確率で反射できる。デッキに1枚まで' },
+  { id: 'poison_reflect',    label: '毒反射',   category: 'reflect', deckLimit: 1,    description: '毒を受けた時、50%の確率で反射できる。デッキに1枚まで' },
+  { id: 'paralysis_reflect', label: '麻痺反射', category: 'reflect', deckLimit: 1,    description: '麻痺を受けた時、50%の確率で反射できる。デッキに1枚まで' },
   { id: 'invincible',        label: '無敵技',   category: 'special', deckLimit: 1,    description: '40固定ダメージ。反射無効（絶対防御のみ止められる）。デッキに1枚まで' },
-  { id: 'absolute_defense',  label: '絶対防御', category: 'special', deckLimit: 1,    description: '自分のターンに使用。次の攻撃を1回完全に防ぐ（無敵技も含む）。デッキに1枚まで' },
+  { id: 'absolute_defense',  label: '絶対防御', category: 'special', deckLimit: 1,    description: '攻撃を受けた時に発動できる。1回の攻撃を完全に防ぐ（無敵技も含む）。デッキに1枚まで' },
+  { id: 'double_attack',     label: '二連撃',   category: 'special', deckLimit: 1,    description: '攻撃カードと同時に使用。その攻撃を2回連続で発動する。絶対防御で両ヒットとも防げる。デッキに1枚まで' },
 ];
 
 export const EFFECT_MAP = Object.fromEntries(EFFECTS.map(e => [e.id, e]));
