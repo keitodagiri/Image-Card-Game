@@ -8,11 +8,13 @@ const roomManager = require('./game/RoomManager');
 
 const app = express();
 const server = http.createServer(app);
+const ALLOWED_ORIGIN = process.env.FRONTEND_URL || 'http://localhost:5173';
+
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: { origin: ALLOWED_ORIGIN, methods: ['GET', 'POST'] },
 });
 
-app.use(cors());
+app.use(cors({ origin: ALLOWED_ORIGIN }));
 app.use(express.json());
 app.use('/api', uploadRoute);
 app.get('/health', (_, res) => res.json({ ok: true }));
